@@ -9,6 +9,9 @@ logger = logging.getLogger(__name__)
 _client: Client | None = None
 _admin_client: Client | None = None
 
+# Log service key availability at startup
+logger.info(f"SUPABASE_SERVICE_KEY configured: {bool(settings.SUPABASE_SERVICE_KEY)} (len={len(settings.SUPABASE_SERVICE_KEY)})")
+
 
 def get_supabase() -> Client:
     global _client

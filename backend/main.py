@@ -28,7 +28,10 @@ app.include_router(settings_router.router)
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "storage_ready": bool(settings.SUPABASE_SERVICE_KEY),
+    }
 
 
 @app.websocket("/ws/logs")
