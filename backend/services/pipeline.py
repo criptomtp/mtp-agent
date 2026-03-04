@@ -6,7 +6,7 @@ import re
 import sys
 from datetime import datetime, timezone
 
-from backend.services.database import get_supabase, get_tariffs
+from backend.services.database import get_supabase, get_tariffs, upload_to_storage
 from backend.services.api_keys import get_decrypted_key
 from backend.ws.logs import log_manager
 
@@ -119,7 +119,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             )
             lead_id = lead_record.data[0]["id"]
 
-            # Save file records with local file-serving URLs
+            # Save file records — upload PDF to Supabase Storage, fall back to local URL
             project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
             for file_type, file_path in [("pdf", pdf_path), ("email", email_path)]:
                 if not file_path or not os.path.exists(file_path):
@@ -129,10 +129,20 @@ async def run_pipeline(niche: str, count: int) -> dict:
                 content_text = None
 
                 if file_type == "pdf":
-                    # Build relative path from project root for the file-serving endpoint
-                    rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
-                    file_url = f"/api/runs/files/{rel_path}"
-                    await _log(run_id, f"[{i+1}/{len(leads)}] PDF saved: {file_url}")
+                    # Try Supabase Storage first (persists across deploys)
+                    storage_path = f"{run_id}/{lead_id}/proposal.pdf"
+                    with open(file_path, "rb") as f:
+                        file_bytes = f.read()
+                    await _log(run_id, f"[{i+1}/{len(leads)}] Uploading PDF ({len(file_bytes)} bytes)...")
+                    storage_url = upload_to_storage("proposals", storage_path, file_bytes)
+                    if storage_url:
+                        file_url = storage_url
+                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF uploaded to storage")
+                    else:
+                        # Fall back to local file-serving endpoint
+                        rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
+                        file_url = f"/api/runs/files/{rel_path}"
+                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF saved locally: {file_url}")
 
                 elif file_type == "email":
                     with open(file_path, "r", encoding="utf-8") as f:

@@ -208,7 +208,8 @@ class ResearchAgent:
                 _add_lead(lead)
 
         # Channel dispatch — order matters for priority
-        remaining = lambda: count - len(leads)
+        # Request 2x to account for dedup filtering
+        remaining = lambda: max(0, count * 2 - len(leads))
         channel_methods = {
             "prom": lambda: self._search_prom(remaining()),
             "google_maps": lambda: self._search_google_maps(remaining()),
@@ -228,14 +229,20 @@ class ResearchAgent:
                 except Exception as e:
                     logger.warning(f"[ResearchAgent] Channel {channel} failed: {e}")
 
-        # Fallback
-        if len(leads) < count:
-            fallback_pool = list(self.FALLBACK_LEADS)
-            random.shuffle(fallback_pool)
-            _add_leads(fallback_pool)
-
         # Deduplicate against existing leads in DB
         leads = self._filter_already_contacted(leads)
+
+        # Fallback only if we still need more after dedup
+        if len(leads) < count:
+            fallback_pool = self._filter_already_contacted(list(self.FALLBACK_LEADS))
+            random.shuffle(fallback_pool)
+            for lead in fallback_pool:
+                if len(leads) >= count:
+                    break
+                norm = _normalize_name(lead.name)
+                if norm not in seen_names and len(norm) >= 3:
+                    seen_names.add(norm)
+                    leads.append(lead)
 
         return leads[:count]
 
