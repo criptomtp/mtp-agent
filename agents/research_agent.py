@@ -43,6 +43,10 @@ class ResearchAgent:
     PROM_SEARCH_URL = "https://prom.ua/search?search_term={query}"
     PROM_COMPANY_URL = "https://prom.ua/c{company_id}"
     GOOGLE_MAPS_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    GOOGLE_PLACE_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+
+    def __init__(self, api_keys: Optional[dict] = None):
+        self._api_keys = api_keys or {}
 
     HEADERS = {
         "User-Agent": (
@@ -238,6 +242,10 @@ class ResearchAgent:
                     if website and "prom.ua" in website:
                         self._enrich_lead_from_prom(lead)
 
+                    # Scrape contacts from website if available
+                    if lead.website and "prom.ua" not in lead.website:
+                        self._scrape_contact_from_website(lead)
+
                     leads.append(lead)
 
                     if len(leads) >= count:
@@ -297,8 +305,8 @@ class ResearchAgent:
             logger.debug(f"[ResearchAgent] Prom enrichment failed for {lead.name}: {e}")
 
     def _search_google_maps(self, count: int) -> List[Lead]:
-        """Пошук через Google Maps Places API."""
-        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        """Пошук через Google Maps Places API з Place Details enrichment."""
+        api_key = self._api_keys.get("GOOGLE_MAPS_API_KEY") or os.getenv("GOOGLE_MAPS_API_KEY")
         if not api_key:
             logger.info("[ResearchAgent] Google Maps API key не налаштований, пропускаю.")
             return []
@@ -323,12 +331,23 @@ class ResearchAgent:
                     address = place.get("formatted_address", "")
                     city = address.split(",")[0].strip() if address else ""
 
-                    leads.append(Lead(
+                    lead = Lead(
                         name=name,
                         city=city,
                         description=f"Знайдено через Google Maps: {address}",
                         source="google_maps",
-                    ))
+                    )
+
+                    # Enrich via Place Details API
+                    place_id = place.get("place_id")
+                    if place_id:
+                        self._enrich_from_place_details(lead, place_id, api_key)
+
+                    # Scrape contacts from website if available
+                    if lead.website:
+                        self._scrape_contact_from_website(lead)
+
+                    leads.append(lead)
 
                     if len(leads) >= count:
                         break
@@ -338,3 +357,65 @@ class ResearchAgent:
                 continue
 
         return leads
+
+    def _enrich_from_place_details(self, lead: Lead, place_id: str, api_key: str):
+        """Fetch phone and website from Google Place Details API."""
+        try:
+            resp = requests.get(
+                self.GOOGLE_PLACE_DETAILS_URL,
+                params={
+                    "place_id": place_id,
+                    "fields": "formatted_phone_number,international_phone_number,website",
+                    "key": api_key,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            result = resp.json().get("result", {})
+
+            phone = result.get("international_phone_number") or result.get("formatted_phone_number", "")
+            if phone and not lead.phone:
+                lead.phone = phone
+
+            website = result.get("website", "")
+            if website and not lead.website:
+                lead.website = website
+
+        except Exception as e:
+            logger.debug(f"[ResearchAgent] Place Details failed for {lead.name}: {e}")
+
+    def _scrape_contact_from_website(self, lead: Lead):
+        """Scrape email and phone from a company website."""
+        try:
+            resp = requests.get(lead.website, headers=self.HEADERS, timeout=10)
+            resp.raise_for_status()
+            html = resp.text
+
+            # Extract email from mailto: links
+            if not lead.email:
+                soup = BeautifulSoup(html, "lxml")
+                mailto = soup.select_one("[href^='mailto:']")
+                if mailto:
+                    email = mailto["href"].replace("mailto:", "").split("?")[0].strip()
+                    if "@" in email:
+                        lead.email = email
+
+            # Regex fallback for email
+            if not lead.email:
+                emails = re.findall(r"[\w.-]+@[\w.-]+\.\w+", html)
+                # Filter out common non-contact emails
+                for email in emails:
+                    if not any(x in email.lower() for x in ["example.com", "wixpress", "sentry", "googleapis"]):
+                        lead.email = email
+                        break
+
+            # Regex for UA phone if still missing
+            if not lead.phone:
+                phones = re.findall(r"\+380\d{9}", html)
+                if not phones:
+                    phones = re.findall(r"(?<!\d)0\d{9}(?!\d)", html)
+                if phones:
+                    lead.phone = phones[0] if phones[0].startswith("+") else f"+38{phones[0]}"
+
+        except Exception as e:
+            logger.debug(f"[ResearchAgent] Website scrape failed for {lead.name}: {e}")
