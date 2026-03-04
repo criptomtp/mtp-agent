@@ -36,11 +36,20 @@ def health():
 
 @app.get("/api/test-upload")
 def test_upload():
-    """Temporary: test Supabase Storage upload."""
-    from backend.services.database import upload_to_storage
-    test_data = b"%PDF-1.4 test upload from Railway"
-    url = upload_to_storage("proposals", "test/railway_test.pdf", test_data)
-    return {"uploaded": bool(url), "url": url}
+    """Temporary: test Supabase Storage upload with raw error."""
+    from backend.services.database import get_supabase_admin
+    import traceback
+    try:
+        db = get_supabase_admin()
+        test_data = b"%PDF-1.4 test upload from Railway"
+        result = db.storage.from_("proposals").upload(
+            "test/railway_test.pdf", test_data,
+            {"content-type": "application/pdf", "upsert": "true"}
+        )
+        public_url = db.storage.from_("proposals").get_public_url("test/railway_test.pdf")
+        return {"uploaded": True, "url": public_url, "result": str(result)}
+    except Exception as e:
+        return {"uploaded": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
 
 
 @app.websocket("/ws/logs")
