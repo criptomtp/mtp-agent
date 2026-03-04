@@ -29,6 +29,8 @@ export const api = {
 
   getLead: (id: string) => request<any>(`/api/leads/${id}`),
 
+  getLeadFiles: (id: string) => request<any[]>(`/api/leads/${id}/files`),
+
   getRuns: (limit = 50, offset = 0) =>
     request<any[]>(`/api/runs/?limit=${limit}&offset=${offset}`),
 

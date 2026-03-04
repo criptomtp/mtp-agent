@@ -33,3 +33,17 @@ def get_lead(lead_id: str):
         .execute()
     )
     return {**lead.data, "files": files.data}
+
+
+@router.get("/{lead_id}/files")
+def get_lead_files(lead_id: str):
+    """Return generated files for a lead, including storage URLs and email text."""
+    db = get_supabase()
+    result = (
+        db.table("generated_files")
+        .select("*")
+        .eq("lead_id", lead_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return result.data

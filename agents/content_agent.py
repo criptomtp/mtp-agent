@@ -24,7 +24,7 @@ WHITE = HexColor("#FFFFFF")
 LIGHT_GRAY = HexColor("#F5F5F5")
 DARK_TEXT = HexColor("#333333")
 
-MTP_TARIFFS_TABLE = [
+HARDCODED_TARIFFS_TABLE = [
     ["Послуга", "Тариф"],
     ["Прийом товару", "2 грн / одиниця"],
     ["Зберігання (паллет)", "800 грн / місяць"],
@@ -34,6 +34,27 @@ MTP_TARIFFS_TABLE = [
     ["Пакування", "8 грн / замовлення"],
     ["Відправка Новою Поштою", "за тарифом НП"],
 ]
+
+
+def _build_tariffs_table(tariffs=None):
+    """Build tariff table rows from DB tariffs or fallback to hardcoded."""
+    if not tariffs:
+        return HARDCODED_TARIFFS_TABLE
+
+    rows = [["Послуга", "Тариф"]]
+    for t in tariffs:
+        name = t["service_name"]
+        price = t["price"]
+        unit = t.get("unit", "")
+        note = t.get("note", "")
+        if price > 0:
+            tariff_str = f"{int(price)} грн / {unit}" if unit else f"{int(price)} грн"
+        elif note:
+            tariff_str = note
+        else:
+            continue
+        rows.append([name, tariff_str])
+    return rows if len(rows) > 1 else HARDCODED_TARIFFS_TABLE
 
 
 def _register_fonts():
@@ -84,19 +105,19 @@ class ContentAgent:
     def __init__(self):
         self._fonts_registered = _register_fonts()
 
-    def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str) -> Dict[str, str]:
+    def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str, tariffs=None) -> Dict[str, str]:
         """Генерує PDF та email.txt. Повертає шляхи до файлів."""
         os.makedirs(output_dir, exist_ok=True)
 
         pdf_path = os.path.join(output_dir, "proposal.pdf")
         email_path = os.path.join(output_dir, "email.txt")
 
-        self._generate_pdf(lead, analysis, pdf_path)
+        self._generate_pdf(lead, analysis, pdf_path, tariffs)
         self._generate_email(lead, analysis, email_path)
 
         return {"pdf": pdf_path, "email": email_path}
 
-    def _generate_pdf(self, lead: Lead, analysis: Dict[str, Any], path: str):
+    def _generate_pdf(self, lead: Lead, analysis: Dict[str, Any], path: str, tariffs=None):
         font = _get_font_name()
         font_bold = _get_font_name(bold=True)
 
@@ -189,19 +210,21 @@ class ContentAgent:
             elements.append(Paragraph(vp, s_body))
 
         # --- Болі клієнта ---
-        elements.append(Paragraph("Типовi виклики e-commerce бiзнесу", s_heading))
-        pains = [
+        pain_points = analysis.get("pain_points", [
             "Витрати часу на пакування та вiдправку замовлень",
             "Помилки при комплектацiї та втрата клiєнтiв",
             "Складнощi з масштабуванням у пiковi сезони",
             "Висока вартiсть оренди власного складу",
-        ]
-        for pain in pains:
-            elements.append(Paragraph(f"• {pain}", s_body))
+        ])
+        if pain_points:
+            elements.append(Paragraph("Типовi виклики e-commerce бiзнесу", s_heading))
+            for pain in pain_points:
+                elements.append(Paragraph(f"• {pain}", s_body))
 
         # --- Тарифи ---
         elements.append(Paragraph("Тарифи MTP Fulfillment", s_heading))
-        table = Table(MTP_TARIFFS_TABLE, colWidths=[100 * mm, 60 * mm])
+        tariffs_table_data = _build_tariffs_table(tariffs)
+        table = Table(tariffs_table_data, colWidths=[100 * mm, 60 * mm])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), BLUE),
             ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),

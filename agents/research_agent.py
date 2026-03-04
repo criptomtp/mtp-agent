@@ -3,6 +3,8 @@
 import os
 import re
 import random
+import logging
+import unicodedata
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
@@ -11,6 +13,8 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -25,10 +29,19 @@ class Lead:
     source: str = ""
 
 
+def _normalize_name(name: str) -> str:
+    """Normalize company name for dedup: lowercase, strip punctuation/whitespace."""
+    name = unicodedata.normalize("NFKC", name).lower().strip()
+    name = re.sub(r"[^\w\s]", "", name)
+    name = re.sub(r"\s+", " ", name)
+    return name
+
+
 class ResearchAgent:
     """Шукає потенційних клієнтів косметики на Prom.ua та Google Maps."""
 
     PROM_SEARCH_URL = "https://prom.ua/search?search_term={query}"
+    PROM_COMPANY_URL = "https://prom.ua/c{company_id}"
     GOOGLE_MAPS_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
     HEADERS = {
@@ -38,6 +51,17 @@ class ResearchAgent:
             "Chrome/120.0.0.0 Safari/537.36"
         )
     }
+
+    # Targeted queries for cosmetics companies that need fulfillment
+    PROM_QUERIES = [
+        "косметика виробник",
+        "натуральна косметика магазин",
+        "косметика оптом",
+        "косметика інтернет магазин",
+        "натуральна косметика виробник",
+        "корейська косметика магазин",
+        "професійна косметика дистриб'ютор",
+    ]
 
     FALLBACK_LEADS = [
         Lead(
@@ -145,28 +169,47 @@ class ResearchAgent:
     def search(self, count: int = 5) -> List[Lead]:
         """Шукає лідів з усіх джерел, повертає до count результатів."""
         leads: List[Lead] = []
+        seen_names: set = set()
 
-        prom_leads = self._search_prom(count)
-        leads.extend(prom_leads)
+        def _add_lead(lead: Lead) -> bool:
+            norm = _normalize_name(lead.name)
+            if norm in seen_names or len(norm) < 3:
+                return False
+            seen_names.add(norm)
+            leads.append(lead)
+            return True
 
+        # Prom.ua — targeted queries
+        prom_leads = self._search_prom(count * 2)  # fetch extra for dedup
+        for lead in prom_leads:
+            if len(leads) >= count:
+                break
+            _add_lead(lead)
+
+        # Google Maps
         if len(leads) < count:
             maps_leads = self._search_google_maps(count - len(leads))
-            leads.extend(maps_leads)
+            for lead in maps_leads:
+                if len(leads) >= count:
+                    break
+                _add_lead(lead)
 
+        # Fallback
         if len(leads) < count:
-            needed = count - len(leads)
-            fallback_pool = [l for l in self.FALLBACK_LEADS if l not in leads]
+            fallback_pool = list(self.FALLBACK_LEADS)
             random.shuffle(fallback_pool)
-            leads.extend(fallback_pool[:needed])
+            for lead in fallback_pool:
+                if len(leads) >= count:
+                    break
+                _add_lead(lead)
 
         return leads[:count]
 
     def _search_prom(self, count: int) -> List[Lead]:
-        """Парсинг продавців косметики з Prom.ua."""
+        """Парсинг продавців косметики з Prom.ua з enrichment."""
         leads = []
-        queries = ["косметика оптом", "косметика інтернет магазин", "натуральна косметика виробник"]
 
-        for query in queries:
+        for query in self.PROM_QUERIES:
             if len(leads) >= count:
                 break
             try:
@@ -184,27 +227,80 @@ class ResearchAgent:
                     href = card.get("href", "")
                     website = href if href.startswith("http") else ""
 
-                    leads.append(Lead(
+                    lead = Lead(
                         name=name,
                         website=website,
                         description=f"Продавець косметики на Prom.ua (запит: {query})",
                         source="prom.ua",
-                    ))
+                    )
+
+                    # Try to enrich from company page
+                    if website and "prom.ua" in website:
+                        self._enrich_lead_from_prom(lead)
+
+                    leads.append(lead)
 
                     if len(leads) >= count:
                         break
 
             except Exception as e:
-                print(f"  [ResearchAgent] Prom.ua ({query}): {e}")
+                logger.warning(f"[ResearchAgent] Prom.ua ({query}): {e}")
                 continue
 
         return leads
+
+    def _enrich_lead_from_prom(self, lead: Lead):
+        """Visit Prom.ua company page to extract phone, email, city, products_count."""
+        try:
+            resp = requests.get(lead.website, headers=self.HEADERS, timeout=10)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+
+            # Phone
+            phone_el = soup.select_one("[data-qaid='phone_number'], .js-company-phone, [href^='tel:']")
+            if phone_el:
+                phone_text = phone_el.get("href", "") or phone_el.get_text(strip=True)
+                phone_text = phone_text.replace("tel:", "").strip()
+                if phone_text and len(phone_text) >= 10:
+                    lead.phone = phone_text
+
+            # Email
+            email_el = soup.select_one("[href^='mailto:']")
+            if email_el:
+                email_text = email_el.get("href", "").replace("mailto:", "").strip()
+                if "@" in email_text:
+                    lead.email = email_text
+
+            # City
+            city_el = soup.select_one("[data-qaid='company_city'], .company-address, .seller-address")
+            if city_el:
+                city_text = city_el.get_text(strip=True)
+                if city_text:
+                    lead.city = city_text.split(",")[0].strip()
+
+            # Products count
+            count_el = soup.select_one("[data-qaid='products_count'], .company-products-count")
+            if count_el:
+                count_text = count_el.get_text(strip=True)
+                nums = re.findall(r"\d+", count_text.replace(" ", ""))
+                if nums:
+                    lead.products_count = int(nums[0])
+
+            # Company website (external)
+            ext_site = soup.select_one("[data-qaid='company_site'] a, .company-site a")
+            if ext_site and ext_site.get("href"):
+                ext_url = ext_site["href"]
+                if ext_url.startswith("http") and "prom.ua" not in ext_url:
+                    lead.website = ext_url
+
+        except Exception as e:
+            logger.debug(f"[ResearchAgent] Prom enrichment failed for {lead.name}: {e}")
 
     def _search_google_maps(self, count: int) -> List[Lead]:
         """Пошук через Google Maps Places API."""
         api_key = os.getenv("GOOGLE_MAPS_API_KEY")
         if not api_key:
-            print("  [ResearchAgent] Google Maps API key не налаштований, пропускаю.")
+            logger.info("[ResearchAgent] Google Maps API key не налаштований, пропускаю.")
             return []
 
         leads = []
@@ -238,7 +334,7 @@ class ResearchAgent:
                         break
 
             except Exception as e:
-                print(f"  [ResearchAgent] Google Maps: {e}")
+                logger.warning(f"[ResearchAgent] Google Maps: {e}")
                 continue
 
         return leads

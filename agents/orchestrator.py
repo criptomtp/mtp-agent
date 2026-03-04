@@ -5,7 +5,7 @@ import csv
 import re
 from datetime import datetime
 from dataclasses import asdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from .research_agent import ResearchAgent, Lead
 from .analysis_agent import AnalysisAgent
@@ -16,12 +16,13 @@ from .outreach_agent import OutreachAgent
 class Orchestrator:
     """Координує pipeline: Research → Analysis → Content → Outreach."""
 
-    def __init__(self, send_email: bool = False):
+    def __init__(self, send_email: bool = False, api_keys: Optional[Dict[str, str]] = None, tariffs: Optional[List[Dict[str, Any]]] = None):
         self.research = ResearchAgent()
-        self.analysis = AnalysisAgent()
+        self.analysis = AnalysisAgent(api_keys=api_keys)
         self.content = ContentAgent()
         self.outreach = OutreachAgent()
         self.send_email = send_email
+        self.tariffs = tariffs
 
     def run(self, count: int = 5) -> str:
         """Запускає повний pipeline. Повертає шлях до папки результатів."""
@@ -50,11 +51,11 @@ class Orchestrator:
 
             # 2. Analysis
             print(f"[2/4] AnalysisAgent: аналіз...")
-            analysis = self.analysis.analyze(lead)
+            analysis = self.analysis.analyze(lead, tariffs=self.tariffs)
 
             # 3. Content
             print(f"[3/4] ContentAgent: генерація КП...")
-            files = self.content.generate(lead, analysis, lead_dir)
+            files = self.content.generate(lead, analysis, lead_dir, tariffs=self.tariffs)
             print(f"  PDF: {files['pdf']}")
             print(f"  Email: {files['email']}")
 

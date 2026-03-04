@@ -6,7 +6,8 @@ import re
 import sys
 from datetime import datetime, timezone
 
-from backend.services.database import get_supabase
+from backend.services.database import get_supabase, get_tariffs, upload_to_storage
+from backend.services.api_keys import get_decrypted_key
 from backend.ws.logs import log_manager
 
 logger = logging.getLogger(__name__)
@@ -41,9 +42,25 @@ async def run_pipeline(niche: str, count: int) -> dict:
     try:
         await _log(run_id, f"Starting pipeline: {count} leads for '{niche}'")
 
+        # Load API keys from DB (fall back to env vars in agents)
+        api_keys = {}
+        for key_name in ["GEMINI_API_KEY", "ANTHROPIC_API_KEY"]:
+            service = key_name.replace("_API_KEY", "").lower()
+            val = get_decrypted_key(service)
+            if val:
+                api_keys[key_name] = val
+                await _log(run_id, f"Loaded {service} API key from DB")
+
+        # Load tariffs from DB
+        tariffs = get_tariffs()
+        if tariffs:
+            await _log(run_id, f"Loaded {len(tariffs)} tariffs from DB")
+        else:
+            await _log(run_id, "Using hardcoded tariffs (none in DB)")
+
         from agents.orchestrator import Orchestrator
 
-        orchestrator = Orchestrator(send_email=False)
+        orchestrator = Orchestrator(send_email=False, api_keys=api_keys, tariffs=tariffs)
 
         # 1. Research — method is .search(count)
         await _log(run_id, "Researching leads...")
@@ -60,16 +77,16 @@ async def run_pipeline(niche: str, count: int) -> dict:
             lead_name = lead.name
             await _log(run_id, f"[{i+1}/{len(leads)}] Analyzing: {lead_name}")
 
-            # 2. Analysis — .analyze(lead) returns dict
-            analysis = orchestrator.analysis.analyze(lead)
+            # 2. Analysis — .analyze(lead, tariffs) returns dict
+            analysis = orchestrator.analysis.analyze(lead, tariffs=tariffs)
 
             await _log(run_id, f"[{i+1}/{len(leads)}] Generating content: {lead_name}")
             safe_name = re.sub(r"[^\w\s-]", "", lead_name).strip().replace(" ", "_")[:50]
             lead_dir = os.path.join(results_dir, f"{i+1:02d}_{safe_name}")
             os.makedirs(lead_dir, exist_ok=True)
 
-            # 3. Content — .generate(lead, analysis, dir) returns {'pdf': path, 'email': path}
-            files = orchestrator.content.generate(lead, analysis, lead_dir)
+            # 3. Content — .generate(lead, analysis, dir, tariffs) returns {'pdf': path, 'email': path}
+            files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs)
             pdf_path = files.get("pdf", "")
             email_path = files.get("email", "")
 
@@ -91,22 +108,46 @@ async def run_pipeline(niche: str, count: int) -> dict:
                         "source": lead.source or "",
                         "status": "new",
                         "analysis_json": analysis if isinstance(analysis, dict) else {},
+                        "outreach_status": outreach_status,
+                        "score": analysis.get("score", 0) if isinstance(analysis, dict) else 0,
+                        "score_grade": analysis.get("grade", "D") if isinstance(analysis, dict) else "D",
                     }
                 )
                 .execute()
             )
             lead_id = lead_record.data[0]["id"]
 
-            # Save generated files
+            # Upload PDF to Supabase Storage and save file records
             for file_type, file_path in [("pdf", pdf_path), ("email", email_path)]:
-                if file_path and os.path.exists(file_path):
-                    db.table("generated_files").insert(
-                        {
-                            "lead_id": lead_id,
-                            "file_type": file_type,
-                            "file_path": file_path,
-                        }
-                    ).execute()
+                if not file_path or not os.path.exists(file_path):
+                    continue
+
+                file_url = None
+                content_text = None
+
+                if file_type == "pdf":
+                    # Upload PDF to storage
+                    storage_path = f"{run_id}/{lead_id}/proposal.pdf"
+                    with open(file_path, "rb") as f:
+                        file_bytes = f.read()
+                    file_url = upload_to_storage("proposals", storage_path, file_bytes)
+                    if file_url:
+                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF uploaded to storage")
+
+                elif file_type == "email":
+                    # Read email text content
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content_text = f.read()
+
+                db.table("generated_files").insert(
+                    {
+                        "lead_id": lead_id,
+                        "file_type": file_type,
+                        "file_path": file_path,
+                        "file_url": file_url,
+                        "content_text": content_text,
+                    }
+                ).execute()
 
             await _log(run_id, f"[{i+1}/{len(leads)}] Done: {lead_name} ({outreach_status})")
 
