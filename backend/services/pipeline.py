@@ -44,12 +44,14 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
         # Load API keys from DB (fall back to env vars in agents)
         api_keys = {}
-        for key_name in ["GEMINI_API_KEY", "ANTHROPIC_API_KEY"]:
+        for key_name in ["GEMINI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_MAPS_API_KEY", "GOOGLE_CUSTOM_SEARCH_API_KEY"]:
             service = key_name.replace("_API_KEY", "").lower()
             val = get_decrypted_key(service)
+            if not val:
+                val = os.getenv(key_name)
             if val:
                 api_keys[key_name] = val
-                await _log(run_id, f"Loaded {service} API key from DB")
+                await _log(run_id, f"Loaded {key_name}")
 
         # Load tariffs from DB
         tariffs = get_tariffs()
