@@ -1,5 +1,9 @@
+import logging
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 from backend.config import settings
 from backend.routers import dashboard, leads, runs, settings as settings_router

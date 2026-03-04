@@ -10,12 +10,12 @@ interface Props {
 export default function ApiKeyInput({ serviceName, label, isConfigured }: Props) {
   const [value, setValue] = useState("");
   const [status, setStatus] = useState<"idle" | "testing" | "valid" | "invalid" | "saved">("idle");
+  const [configured, setConfigured] = useState(isConfigured ?? false);
 
-  const test = async () => {
-    if (!value.trim()) return;
+  const test = async (keyToTest?: string) => {
     setStatus("testing");
     try {
-      const result = await api.testApiKey(serviceName, value);
+      const result = await api.testApiKey(serviceName, keyToTest ?? "");
       setStatus(result.valid ? "valid" : "invalid");
     } catch {
       setStatus("invalid");
@@ -24,8 +24,10 @@ export default function ApiKeyInput({ serviceName, label, isConfigured }: Props)
 
   const save = async () => {
     if (!value.trim()) return;
+    setStatus("testing");
     try {
       await api.saveApiKey(serviceName, value);
+      setConfigured(true);
       setStatus("saved");
       setValue("");
     } catch {
@@ -37,7 +39,7 @@ export default function ApiKeyInput({ serviceName, label, isConfigured }: Props)
     <div className="bg-white rounded-lg shadow p-4">
       <div className="flex items-center justify-between mb-2">
         <label className="text-sm font-medium text-gray-700">{label}</label>
-        {isConfigured && (
+        {configured && (
           <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
             Configured
           </span>
@@ -51,15 +53,15 @@ export default function ApiKeyInput({ serviceName, label, isConfigured }: Props)
             setValue(e.target.value);
             setStatus("idle");
           }}
-          placeholder={isConfigured ? "Enter new key to update" : "Enter API key"}
+          placeholder={configured ? "Enter new key to update" : "Enter API key"}
           className="flex-1 border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-mtp-blue/30"
         />
         <button
-          onClick={test}
-          disabled={!value.trim() || status === "testing"}
+          onClick={() => test(value.trim() || undefined)}
+          disabled={!value.trim() && !configured || status === "testing"}
           className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50 disabled:opacity-40"
         >
-          {status === "testing" ? "Testing..." : "Test"}
+          {status === "testing" ? "Testing..." : value.trim() ? "Test" : "Test Saved"}
         </button>
         <button
           onClick={save}

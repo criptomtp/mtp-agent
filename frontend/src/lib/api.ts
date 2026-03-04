@@ -42,7 +42,7 @@ export const api = {
       body: JSON.stringify({ service_name, key_value }),
     }),
 
-  testApiKey: (service_name: string, key_value: string) =>
+  testApiKey: (service_name: string, key_value: string = "") =>
     request<{ valid: boolean; error?: string }>("/api/settings/api-keys/test", {
       method: "POST",
       body: JSON.stringify({ service_name, key_value }),
