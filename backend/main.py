@@ -21,6 +21,7 @@ app.include_router(runs.router)
 app.include_router(settings_router.router)
 
 
+@app.get("/health")
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
