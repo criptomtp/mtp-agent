@@ -57,53 +57,65 @@ def _build_tariffs_table(tariffs=None):
     return rows if len(rows) > 1 else HARDCODED_TARIFFS_TABLE
 
 
-def _register_fonts():
-    """Реєстрація DejaVu шрифтів для кирилиці."""
-    font_paths = [
-        "/usr/share/fonts/truetype/dejavu/",
-        "/usr/share/fonts/dejavu/",
-        "/System/Library/Fonts/",
-        "/Library/Fonts/",
-        os.path.expanduser("~/Library/Fonts/"),
-        "/usr/local/share/fonts/",
+def _register_cyrillic_font() -> str:
+    """Реєстрація DejaVu шрифтів для кирилиці з автозавантаженням."""
+    search_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/Library/Fonts/DejaVuSans.ttf",
+        os.path.expanduser("~/Library/Fonts/DejaVuSans.ttf"),
+        os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf"),
+        os.path.join(os.path.dirname(__file__), "..", "fonts", "DejaVuSans.ttf"),
     ]
 
-    dejavu_regular = None
-    dejavu_bold = None
+    for path in search_paths:
+        if os.path.exists(path):
+            bold_path = path.replace("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
+            pdfmetrics.registerFont(TTFont("DejaVuSans", path))
+            if os.path.exists(bold_path):
+                pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
+            return "DejaVuSans"
 
-    for base in font_paths:
-        regular = os.path.join(base, "DejaVuSans.ttf")
-        bold = os.path.join(base, "DejaVuSans-Bold.ttf")
-        if os.path.exists(regular):
-            dejavu_regular = regular
-        if os.path.exists(bold):
-            dejavu_bold = bold
-        if dejavu_regular and dejavu_bold:
-            break
+    # Автозавантаження якщо не знайдено
+    fonts_dir = os.path.join(os.path.dirname(__file__), "..", "fonts")
+    os.makedirs(fonts_dir, exist_ok=True)
+    font_path = os.path.join(fonts_dir, "DejaVuSans.ttf")
+    bold_path = os.path.join(fonts_dir, "DejaVuSans-Bold.ttf")
 
-    if dejavu_regular:
-        pdfmetrics.registerFont(TTFont("DejaVu", dejavu_regular))
-    if dejavu_bold:
-        pdfmetrics.registerFont(TTFont("DejaVu-Bold", dejavu_bold))
+    if not os.path.exists(font_path):
+        import urllib.request, zipfile, tempfile
+        print("[ContentAgent] Завантаження DejaVuSans шрифту...")
+        zip_url = "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip"
+        zip_path = os.path.join(tempfile.gettempdir(), "dejavu.zip")
+        urllib.request.urlretrieve(zip_url, zip_path)
+        with zipfile.ZipFile(zip_path) as z:
+            for name in z.namelist():
+                basename = os.path.basename(name)
+                if basename in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"):
+                    with open(os.path.join(fonts_dir, basename), "wb") as f:
+                        f.write(z.read(name))
 
-    return dejavu_regular is not None
+    pdfmetrics.registerFont(TTFont("DejaVuSans", font_path))
+    if os.path.exists(bold_path):
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
+    return "DejaVuSans"
+
+
+FONT_NAME = _register_cyrillic_font()
+FONT_BOLD = "DejaVuSans-Bold"
 
 
 def _get_font_name(bold: bool = False) -> str:
-    """Повертає назву шрифту з fallback на Helvetica."""
-    try:
-        name = "DejaVu-Bold" if bold else "DejaVu"
-        pdfmetrics.getFont(name)
-        return name
-    except KeyError:
-        return "Helvetica-Bold" if bold else "Helvetica"
+    """Повертає назву шрифту."""
+    return FONT_BOLD if bold else FONT_NAME
 
 
 class ContentAgent:
     """Генерує PDF КП та email текст."""
 
     def __init__(self):
-        self._fonts_registered = _register_fonts()
+        self._fonts_registered = bool(FONT_NAME)
 
     def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str, tariffs=None) -> Dict[str, str]:
         """Генерує PDF та email.txt. Повертає шляхи до файлів."""

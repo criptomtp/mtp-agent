@@ -37,6 +37,16 @@ def _normalize_name(name: str) -> str:
     return name
 
 
+def clean_company_name(name: str) -> str:
+    """Обрізає довгі назви компаній до читабельної форми."""
+    if len(name) <= 40:
+        return name
+    for sep in [",", "(", "\u2014", " - ", " | "]:
+        if sep in name:
+            return name.split(sep)[0].strip()
+    return name[:40].strip()
+
+
 class ResearchAgent:
     """Шукає потенційних клієнтів косметики з багатьох джерел."""
 
@@ -344,7 +354,7 @@ class ResearchAgent:
                 data = resp.json()
 
                 for place in data.get("results", [])[:count]:
-                    name = place.get("name", "")
+                    name = clean_company_name(place.get("name", ""))
                     address = place.get("formatted_address", "")
                     city = address.split(",")[0].strip() if address else ""
 
@@ -480,7 +490,7 @@ class ResearchAgent:
                     # Extract domain as company name fallback
                     from urllib.parse import urlparse
                     domain = urlparse(link).netloc.replace("www.", "")
-                    name = title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                    name = clean_company_name(title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip())
                     if not name or len(name) < 3:
                         name = domain
 
