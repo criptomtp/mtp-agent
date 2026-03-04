@@ -58,11 +58,14 @@ def upload_to_storage(bucket: str, path: str, file_bytes: bytes, content_type: s
     """Upload a file to Supabase Storage. Returns public URL or None."""
     try:
         db = get_supabase_admin()
-        logger.info(f"upload_to_storage: bucket={bucket}, path={path}, size={len(file_bytes)}")
-        db.storage.from_(bucket).upload(path, file_bytes, {"content-type": content_type, "upsert": "true"})
+        logger.info(f"upload_to_storage: bucket={bucket}, path={path}, size={len(file_bytes)}, service_key_available={bool(settings.SUPABASE_SERVICE_KEY)}")
+        result = db.storage.from_(bucket).upload(
+            path, file_bytes, {"content-type": content_type, "upsert": "true"}
+        )
+        logger.info(f"upload_to_storage: result={result}")
         public_url = db.storage.from_(bucket).get_public_url(path)
-        logger.info(f"upload_to_storage: success, url={public_url[:80]}")
+        logger.info(f"upload_to_storage: public_url={public_url[:100]}")
         return public_url
     except Exception as e:
-        logger.error(f"Storage upload failed ({bucket}/{path}): {e}", exc_info=True)
+        logger.error(f"Storage upload FAILED ({bucket}/{path}): {type(e).__name__}: {e}", exc_info=True)
         return None

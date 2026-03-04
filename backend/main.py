@@ -34,6 +34,15 @@ def health():
     }
 
 
+@app.get("/api/test-upload")
+def test_upload():
+    """Temporary: test Supabase Storage upload."""
+    from backend.services.database import upload_to_storage
+    test_data = b"%PDF-1.4 test upload from Railway"
+    url = upload_to_storage("proposals", "test/railway_test.pdf", test_data)
+    return {"uploaded": bool(url), "url": url}
+
+
 @app.websocket("/ws/logs")
 async def websocket_logs(ws: WebSocket):
     await log_manager.connect(ws)
