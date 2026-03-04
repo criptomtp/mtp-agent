@@ -83,44 +83,82 @@ def _scrape_website(url: str) -> Dict[str, str]:
         return {}
 
 
-def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, str]) -> str:
-    website_section = ""
+def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, str]) -> tuple:
+    """Returns (system_prompt, user_prompt) for the AI analysis."""
+    website_section = "Немає даних"
     if website_data:
-        website_section = f"""
-Дані з сайту компанії ({lead.website}):
-- Заголовок: {website_data.get('title', 'н/д')}
-- Мета-опис: {website_data.get('meta_description', 'н/д')}
-- Фрагмент тексту: {website_data.get('text_excerpt', 'н/д')[:500]}
-"""
+        title = website_data.get("title", "н/д")
+        meta = website_data.get("meta_description", "н/д")
+        text = website_data.get("text_excerpt", "н/д")[:800]
+        website_section = f"Заголовок: {title}\nМета-опис: {meta}\nТекст сайту: {text}"
 
-    return f"""Ти — бізнес-аналітик компанії MTP Fulfillment (3PL фулфілмент, Бориспіль, Україна).
+    system_prompt = (
+        "Ти досвідчений B2B маркетолог і копірайтер. Пишеш українською мовою. "
+        "Твій стиль: конкретний, без води, з емпатією до болів клієнта. "
+        'Мета кожного аналізу — змусити власника бізнесу сказати: "Це написано саме про мене".'
+    )
 
-Проаналізуй потенційного клієнта та поверни JSON (без markdown, тільки чистий JSON):
+    user_prompt = f"""Проаналізуй компанію для персоналізованої комерційної пропозиції від MTP Fulfillment.
 
-Клієнт:
-- Назва: {lead.name}
-- Сайт: {lead.website}
-- Місто: {lead.city}
-- Опис: {lead.description}
-- Кількість товарів: {lead.products_count}
+## Дані компанії:
+Назва: {lead.name}
+Місто: {lead.city}
+Сайт: {lead.website}
+Опис: {lead.description}
+Кількість товарів: {lead.products_count}
+Джерело: {lead.source}
+
+## Дані з сайту:
 {website_section}
-Тарифи MTP:
+
+## Про MTP Fulfillment:
+- 3PL склад у Борисполі (біля Києва) та Білогородці
+- 60 000+ відправок на місяць
+- 7+ років на ринку
+- Клієнти: KRKR (корейська косметика, ріст x10), ELEMIS Ukraine (7 років), ORNER
+- Спеціалізація: e-commerce, краса, здоров'я, одяг
+- Перевага: локальні тарифи Нової Пошти для клієнтів не з Києва
+- Кабінет клієнта 24/7, API інтеграції
+
+## Тарифи МТП:
 {tariffs_text}
 
-Поверни JSON з полями:
+## Твоє завдання — повернути JSON з такими полями:
+
 {{
-  "company_analysis": "короткий аналіз компанії та її потреб у фулфілменті (2-3 речення)",
-  "mtp_value_proposition": "чому MTP Fulfillment ідеально підходить цьому клієнту (2-3 речення)",
-  "pain_points": ["біль 1", "біль 2", "біль 3"],
-  "potential": "low / medium / high",
+  "hook": "Чіпляючий заголовок для першого екрану презентації (до 10 слів, говорить мовою клієнта)",
+  "client_insight": "Що ми знаємо про їх бізнес — 2-3 речення про специфіку САМЕ цієї компанії",
+  "pain_points": [
+    {{"title": "Назва болю", "description": "Як цей біль проявляється саме в їх бізнесі"}}
+  ],
+  "mtp_fit": "Чому МТП ідеально підходить САМЕ цьому клієнту — конкретно, не шаблонно",
+  "key_benefits": [
+    {{"benefit": "Вигода", "proof": "Доказ або кейс"}}
+  ],
+  "zoom_cta": "Персоналізований заклик на Zoom — згадати їх продукт або нішу",
+  "email_subject": "Тема листа яку захочеться відкрити",
+  "email_opening": "Перший абзац email — персоналізований, не шаблонний",
+  "potential": "high або medium або low",
   "pricing_estimate": {{
-    "зберігання_місяць": "оцінка в грн",
-    "комплектація_місяць": "оцінка в грн (при ~500 замовлень/міс)",
-    "пакування_місяць": "оцінка в грн",
-    "загалом_місяць": "оцінка загальна в грн"
+    "зберігання_місяць": "розрахунок",
+    "відвантаження_місяць": "розрахунок",
+    "загалом_місяць": "підсумок"
   }},
-  "personalization": "персональне звернення до клієнта для листа (1-2 речення)"
-}}"""
+  "score_data": {{
+    "products_count_estimated": 0,
+    "orders_per_month_estimated": 0,
+    "is_outside_kyiv": true
+  }}
+}}
+
+Важливо:
+- hook має говорити мовою клієнта, використовувати їх нішу
+- pain_points мають бути специфічні для їх типу товару
+- zoom_cta має згадувати конкретний продукт або нішу клієнта
+- НЕ використовуй шаблонні фрази типу "повний цикл логістики"
+- Повертай ТІЛЬКИ валідний JSON без markdown"""
+
+    return system_prompt, user_prompt
 
 
 class AnalysisAgent:
@@ -163,8 +201,9 @@ class AnalysisAgent:
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
-            response = model.generate_content(_build_prompt(lead, tariffs_text, website_data))
+            system_prompt, user_prompt = _build_prompt(lead, tariffs_text, website_data)
+            model = genai.GenerativeModel("gemini-2.0-flash", system_instruction=system_prompt)
+            response = model.generate_content(user_prompt)
             text = response.text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -182,10 +221,12 @@ class AnalysisAgent:
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
+            system_prompt, user_prompt = _build_prompt(lead, tariffs_text, website_data)
             message = client.messages.create(
                 model="claude-sonnet-4-20250514",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": _build_prompt(lead, tariffs_text, website_data)}],
+                max_tokens=1500,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
             )
             text = message.content[0].text.strip()
             if text.startswith("```"):
@@ -208,33 +249,45 @@ class AnalysisAgent:
         total = storage_cost + picking_cost
 
         city_note = f" з {lead.city}" if lead.city else ""
+        is_outside_kyiv = bool(lead.city) and "київ" not in (lead.city or "").lower()
 
         return {
-            "company_analysis": (
+            "hook": f"{lead.name}: час масштабуватись без болю",
+            "client_insight": (
                 f"{lead.name} — компанія{city_note}, що працює у сфері косметики. "
-                f"{'Має каталог з ' + str(products) + ' товарів. ' if products > 0 else ''}"
-                f"Потребує надійного фулфілмент-партнера для зберігання та доставки продукції."
-            ),
-            "mtp_value_proposition": (
-                f"MTP Fulfillment забезпечить {lead.name} повний цикл логістики: "
-                f"від прийому товару на склад у Борисполі до доставки кінцевому клієнту через Нову Пошту. "
-                f"Це дозволить зосередитись на розвитку бренду та маркетингу."
+                f"{'Каталог з ' + str(products) + ' товарів потребує системної логістики.' if products > 0 else 'Потребує надійного логістичного партнера.'}"
             ),
             "pain_points": [
-                "Витрати часу на пакування та відправку замовлень",
-                "Помилки при комплектації та втрата клієнтів",
-                "Складнощі з масштабуванням у пікові сезони",
+                {"title": "Час на рутину", "description": "Пакування і відправка замовлень забирають години, які можна витратити на розвиток бренду"},
+                {"title": "Помилки комплектації", "description": "Кожна помилка — це повернення, негативний відгук і втрачений клієнт"},
+                {"title": "Піки продажів", "description": "Сезонні акції та розпродажі перевантажують команду, замовлення затримуються"},
             ],
+            "mtp_fit": (
+                f"МТП обробляє 60 000+ відправок щомісяця — {lead.name} отримає ту саму швидкість і точність, "
+                f"що й наші клієнти KRKR та ELEMIS Ukraine."
+            ),
+            "key_benefits": [
+                {"benefit": "Швидка доставка з Борисполя", "proof": "Клієнт KRKR виріс x10 за рік завдяки швидкій логістиці"},
+                {"benefit": "Прозорість 24/7", "proof": "Кабінет клієнта з трекінгом кожного замовлення в реальному часі"},
+                {"benefit": "Економія на тарифах НП", "proof": "Локальні тарифи Нової Пошти для клієнтів не з Києва"},
+            ],
+            "zoom_cta": f"Покажемо як {lead.name} може передати логістику за 3 дні — 20 хвилин на Zoom",
+            "email_subject": f"{lead.name}, логістика не має забирати ваш час",
+            "email_opening": (
+                f"Привіт! Ми подивились на {lead.name} і бачимо бізнес, який готовий рости швидше. "
+                f"Але є одна річ, яка гальмує — логістика."
+            ),
             "potential": "medium",
             "pricing_estimate": {
                 "зберігання_місяць": f"{storage_cost} грн ({storage_m3} м³ × 650 грн)",
                 "відвантаження_місяць": f"{picking_cost} грн ({orders_month} замовлень × 22 грн)",
                 "загалом_місяць": f"~{total} грн/місяць",
             },
-            "personalization": (
-                f"Вітаємо, {lead.name}! Ми бачимо великий потенціал у співпраці — "
-                f"наш склад у Борисполі ідеально підходить для швидкої доставки косметики по всій Україні."
-            ),
+            "score_data": {
+                "products_count_estimated": products,
+                "orders_per_month_estimated": orders_month,
+                "is_outside_kyiv": is_outside_kyiv,
+            },
         }
 
 

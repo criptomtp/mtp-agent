@@ -147,12 +147,17 @@ class ContentAgent:
         s_title = ParagraphStyle(
             "MTPTitle", parent=styles["Title"],
             fontName=font_bold, fontSize=22, textColor=BLUE, alignment=TA_CENTER,
-            spaceAfter=4 * mm,
+            spaceAfter=2 * mm,
         )
         s_subtitle = ParagraphStyle(
             "MTPSubtitle", parent=styles["Normal"],
             fontName=font, fontSize=11, textColor=ORANGE, alignment=TA_CENTER,
-            spaceAfter=8 * mm,
+            spaceAfter=6 * mm,
+        )
+        s_hook = ParagraphStyle(
+            "MTPHook", parent=styles["Title"],
+            fontName=font_bold, fontSize=18, textColor=ORANGE, alignment=TA_CENTER,
+            spaceBefore=4 * mm, spaceAfter=6 * mm,
         )
         s_heading = ParagraphStyle(
             "MTPHeading", parent=styles["Heading2"],
@@ -164,76 +169,78 @@ class ContentAgent:
             fontName=font, fontSize=10, textColor=DARK_TEXT,
             leading=14, alignment=TA_JUSTIFY, spaceAfter=2 * mm,
         )
+        s_pain_title = ParagraphStyle(
+            "MTPPainTitle", parent=styles["Normal"],
+            fontName=font_bold, fontSize=10, textColor=ORANGE,
+            spaceAfter=1 * mm,
+        )
+        s_benefit = ParagraphStyle(
+            "MTPBenefit", parent=styles["Normal"],
+            fontName=font_bold, fontSize=10, textColor=BLUE,
+            spaceAfter=1 * mm,
+        )
         s_accent = ParagraphStyle(
             "MTPAccent", parent=styles["Normal"],
-            fontName=font_bold, fontSize=11, textColor=ORANGE,
-            spaceAfter=2 * mm,
+            fontName=font_bold, fontSize=12, textColor=ORANGE,
+            alignment=TA_CENTER, spaceAfter=2 * mm,
         )
         s_footer = ParagraphStyle(
             "MTPFooter", parent=styles["Normal"],
             fontName=font, fontSize=9, textColor=BLUE, alignment=TA_CENTER,
         )
+        s_contact = ParagraphStyle(
+            "MTPContact", parent=styles["Normal"],
+            fontName=font, fontSize=9, textColor=DARK_TEXT, alignment=TA_CENTER,
+            spaceAfter=1 * mm,
+        )
 
         elements = []
 
-        # --- Шапка ---
+        # 1. Шапка MTP + назва клієнта
         elements.append(Paragraph("MTP Fulfillment", s_title))
         elements.append(Paragraph(
-            "3PL / Fulfillment | Бориспiль, Україна",
+            f"Комерцiйна пропозицiя для {lead.name}",
             s_subtitle,
         ))
         elements.append(HRFlowable(
-            width="100%", thickness=2, color=ORANGE, spaceAfter=6 * mm,
+            width="100%", thickness=2, color=ORANGE, spaceAfter=4 * mm,
         ))
 
-        # --- Привітання ---
-        date_str = datetime.now().strftime("%d.%m.%Y")
-        elements.append(Paragraph(
-            f"Комерцiйна пропозицiя для {lead.name}",
-            s_heading,
-        ))
-        elements.append(Paragraph(f"Дата: {date_str}", s_body))
+        # 2. Hook
+        hook = analysis.get("hook", f"{lead.name}: час масштабуватись")
+        elements.append(Paragraph(hook, s_hook))
 
-        personalization = analysis.get("personalization", "")
-        if personalization:
-            elements.append(Paragraph(personalization, s_accent))
-        elements.append(Spacer(1, 4 * mm))
+        # 3. Ми розуміємо вашу специфіку — client_insight
+        client_insight = analysis.get("client_insight", "")
+        if client_insight:
+            elements.append(Paragraph("Ми розумiємо вашу специфiку", s_heading))
+            elements.append(Paragraph(client_insight, s_body))
 
-        # --- Про MTP ---
-        elements.append(Paragraph("Про MTP Fulfillment", s_heading))
-        elements.append(Paragraph(
-            "MTP Fulfillment — сучасний 3PL оператор з повним циклом фулфiлменту. "
-            "Наш склад у Борисполi забезпечує швидку обробку та вiдправку замовлень "
-            "по всiй Українi через Нову Пошту. Ми спецiалiзуємось на роботi з "
-            "e-commerce бiзнесами у сферi косметики, здоров'я та краси.",
-            s_body,
-        ))
-
-        # --- Аналіз клієнта ---
-        company_analysis = analysis.get("company_analysis", "")
-        if company_analysis:
-            elements.append(Paragraph("Про вашу компанiю", s_heading))
-            elements.append(Paragraph(company_analysis, s_body))
-
-        # --- Value proposition ---
-        vp = analysis.get("mtp_value_proposition", "")
-        if vp:
-            elements.append(Paragraph("Чому MTP?", s_heading))
-            elements.append(Paragraph(vp, s_body))
-
-        # --- Болі клієнта ---
-        pain_points = analysis.get("pain_points", [
-            "Витрати часу на пакування та вiдправку замовлень",
-            "Помилки при комплектацiї та втрата клiєнтiв",
-            "Складнощi з масштабуванням у пiковi сезони",
-            "Висока вартiсть оренди власного складу",
-        ])
+        # 4. Де зазвичай втрачається ефективність — pain_points
+        pain_points = analysis.get("pain_points", [])
         if pain_points:
-            elements.append(Paragraph("Типовi виклики e-commerce бiзнесу", s_heading))
+            elements.append(Paragraph("Де зазвичай втрачається ефективнiсть", s_heading))
             for pain in pain_points:
-                elements.append(Paragraph(f"• {pain}", s_body))
+                if isinstance(pain, dict):
+                    elements.append(Paragraph(f"▸ {pain.get('title', '')}", s_pain_title))
+                    elements.append(Paragraph(pain.get("description", ""), s_body))
+                else:
+                    elements.append(Paragraph(f"▸ {pain}", s_body))
 
-        # --- Тарифи ---
+        # 5. Чому МТП — key_benefits з proof
+        mtp_fit = analysis.get("mtp_fit", "")
+        key_benefits = analysis.get("key_benefits", [])
+        if mtp_fit or key_benefits:
+            elements.append(Paragraph("Чому МТП", s_heading))
+            if mtp_fit:
+                elements.append(Paragraph(mtp_fit, s_body))
+                elements.append(Spacer(1, 2 * mm))
+            for kb in key_benefits:
+                if isinstance(kb, dict):
+                    elements.append(Paragraph(f"✓ {kb.get('benefit', '')}", s_benefit))
+                    elements.append(Paragraph(kb.get("proof", ""), s_body))
+
+        # 6. Тарифна таблиця
         elements.append(Paragraph("Тарифи MTP Fulfillment", s_heading))
         tariffs_table_data = _build_tariffs_table(tariffs)
         table = Table(tariffs_table_data, colWidths=[100 * mm, 60 * mm])
@@ -256,7 +263,7 @@ class ContentAgent:
         elements.append(table)
         elements.append(Spacer(1, 4 * mm))
 
-        # --- Кошторис ---
+        # 7. Кошторис
         pricing = analysis.get("pricing_estimate", {})
         if pricing:
             elements.append(Paragraph("Орiєнтовний кошторис", s_heading))
@@ -282,67 +289,80 @@ class ContentAgent:
             ]))
             elements.append(est_table)
 
-        # --- CTA ---
+        # 8. CTA на Zoom
         elements.append(Spacer(1, 6 * mm))
         elements.append(HRFlowable(width="100%", thickness=1, color=ORANGE, spaceAfter=4 * mm))
-        elements.append(Paragraph(
-            "Готовi обговорити спiвпрацю? Зв'яжiться з нами!",
-            s_accent,
-        ))
+        zoom_cta = analysis.get("zoom_cta", "Запишiться на безкоштовну Zoom-консультацiю!")
+        elements.append(Paragraph(zoom_cta, s_accent))
 
-        # --- Контакти ---
-        elements.append(Spacer(1, 2 * mm))
+        # 9. Контакти
+        elements.append(Spacer(1, 4 * mm))
         elements.append(Paragraph("MTP Fulfillment", ParagraphStyle(
-            "ContactTitle", parent=s_body, fontName=font_bold, fontSize=11, textColor=BLUE,
+            "ContactTitle", parent=s_body, fontName=font_bold, fontSize=11,
+            textColor=BLUE, alignment=TA_CENTER,
         )))
-        contacts = [
-            "Адреса: м. Бориспiль, Київська обл.",
-            "Сайт: mtp-fulfillment.com",
-            "Email: info@mtp-fulfillment.com",
-        ]
-        for c in contacts:
-            elements.append(Paragraph(c, s_body))
+        for c in [
+            "mtpgrouppromo@gmail.com | +38 (050) 144-46-45",
+            "fulfillmentmtp.com.ua | @nikolay_mtp",
+        ]:
+            elements.append(Paragraph(c, s_contact))
 
-        elements.append(Spacer(1, 8 * mm))
+        elements.append(Spacer(1, 6 * mm))
         elements.append(Paragraph(
-            "© MTP Fulfillment — Ваш надiйний фулфiлмент партнер",
+            "© MTP Fulfillment — 7+ рокiв на ринку, 60 000+ вiдправок на мiсяць",
             s_footer,
         ))
 
         doc.build(elements)
 
     def _generate_email(self, lead: Lead, analysis: Dict[str, Any], path: str):
-        personalization = analysis.get("personalization", f"Вітаємо, {lead.name}!")
-        vp = analysis.get("mtp_value_proposition", "")
+        subject = analysis.get("email_subject", f"{lead.name}, пропозиція від MTP Fulfillment")
+        opening = analysis.get("email_opening", f"Привіт! Ми подивились на {lead.name} і бачимо великий потенціал.")
+        hook = analysis.get("hook", "")
+        client_insight = analysis.get("client_insight", "")
+        mtp_fit = analysis.get("mtp_fit", "")
+        zoom_cta = analysis.get("zoom_cta", "Запишіться на безкоштовну Zoom-консультацію!")
 
-        subject = f"Комерційна пропозиція від MTP Fulfillment для {lead.name}"
+        # Build pain points text
+        pain_lines = []
+        for pain in analysis.get("pain_points", []):
+            if isinstance(pain, dict):
+                pain_lines.append(f"— {pain.get('title', '')}: {pain.get('description', '')}")
+            else:
+                pain_lines.append(f"— {pain}")
+        pains_text = "\n".join(pain_lines)
+
+        # Build benefits text
+        benefit_lines = []
+        for kb in analysis.get("key_benefits", []):
+            if isinstance(kb, dict):
+                benefit_lines.append(f"✓ {kb.get('benefit', '')} — {kb.get('proof', '')}")
+            else:
+                benefit_lines.append(f"✓ {kb}")
+        benefits_text = "\n".join(benefit_lines)
 
         body = f"""Тема: {subject}
 
-Шановні партнери з {lead.name}!
+{opening}
 
-{personalization}
+{client_insight}
 
-Ми — MTP Fulfillment, сучасний 3PL фулфілмент-оператор з Борисполя.
-Спеціалізуємось на повному циклі логістики для e-commerce бізнесів у сфері косметики.
+Знайомі ситуації?
+{pains_text}
 
-{vp}
+{mtp_fit}
 
-Що ми пропонуємо:
-- Прийом та зберігання товару на сучасному складі
-- Комплектацію та пакування замовлень
-- Швидку відправку через Нову Пошту по всій Україні
-- Повну прозорість через особистий кабінет
+Що ви отримаєте з МТП:
+{benefits_text}
 
-У додатку — детальна комерційна пропозиція з тарифами та орієнтовним кошторисом
-спеціально для {lead.name}.
+{zoom_cta}
 
-Будемо раді обговорити деталі співпраці!
+У додатку — детальна комерційна пропозиція з тарифами та кошторисом для {lead.name}.
 
-З повагою,
-Команда MTP Fulfillment
-м. Бориспіль, Київська обл.
-info@mtp-fulfillment.com
+Микола
+MTP Fulfillment
+mtpgrouppromo@gmail.com | +38 (050) 144-46-45
+fulfillmentmtp.com.ua | @nikolay_mtp
 """
 
         with open(path, "w", encoding="utf-8") as f:
