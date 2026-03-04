@@ -13,6 +13,7 @@ class Settings:
         "http://127.0.0.1:5173",
         "https://frontend-chi-azure-98.vercel.app",
         "https://frontend-6viv3g1uu-criptomtp-5211s-projects.vercel.app",
+        "https://mtp-lead-agent.vercel.app",
     ] + ([os.getenv("FRONTEND_URL")] if os.getenv("FRONTEND_URL") else [])
 
 
