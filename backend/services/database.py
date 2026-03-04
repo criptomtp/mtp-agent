@@ -23,8 +23,15 @@ def _get_service_client() -> Client | None:
     global _service_client
     if _service_client is None:
         service_key = os.getenv("SUPABASE_SERVICE_KEY", "")
-        if service_key and service_key.startswith("eyJ"):
+        if not service_key:
+            logger.warning("SUPABASE_SERVICE_KEY not set, storage uploads may fail")
+            return None
+        try:
             _service_client = create_client(settings.SUPABASE_URL, service_key)
+            logger.info("Service client initialized for storage")
+        except Exception as e:
+            logger.error(f"Failed to create service client: {e}")
+            return None
     return _service_client
 
 

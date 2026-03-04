@@ -132,9 +132,12 @@ async def run_pipeline(niche: str, count: int) -> dict:
                     storage_path = f"{run_id}/{lead_id}/proposal.pdf"
                     with open(file_path, "rb") as f:
                         file_bytes = f.read()
+                    await _log(run_id, f"[{i+1}/{len(leads)}] Uploading PDF ({len(file_bytes)} bytes)...")
                     file_url = upload_to_storage("proposals", storage_path, file_bytes)
                     if file_url:
-                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF uploaded to storage")
+                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF uploaded: {file_url[:80]}")
+                    else:
+                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF upload FAILED")
 
                 elif file_type == "email":
                     # Read email text content
