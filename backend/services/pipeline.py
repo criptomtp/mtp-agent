@@ -6,7 +6,7 @@ import re
 import sys
 from datetime import datetime, timezone
 
-from backend.services.database import get_supabase, get_tariffs, upload_to_storage
+from backend.services.database import get_supabase, get_tariffs
 from backend.services.api_keys import get_decrypted_key
 from backend.ws.logs import log_manager
 
@@ -119,7 +119,8 @@ async def run_pipeline(niche: str, count: int) -> dict:
             )
             lead_id = lead_record.data[0]["id"]
 
-            # Upload PDF to Supabase Storage and save file records
+            # Save file records with local file-serving URLs
+            project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
             for file_type, file_path in [("pdf", pdf_path), ("email", email_path)]:
                 if not file_path or not os.path.exists(file_path):
                     continue
@@ -128,19 +129,12 @@ async def run_pipeline(niche: str, count: int) -> dict:
                 content_text = None
 
                 if file_type == "pdf":
-                    # Upload PDF to storage
-                    storage_path = f"{run_id}/{lead_id}/proposal.pdf"
-                    with open(file_path, "rb") as f:
-                        file_bytes = f.read()
-                    await _log(run_id, f"[{i+1}/{len(leads)}] Uploading PDF ({len(file_bytes)} bytes)...")
-                    file_url = upload_to_storage("proposals", storage_path, file_bytes)
-                    if file_url:
-                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF uploaded: {file_url[:80]}")
-                    else:
-                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF upload FAILED")
+                    # Build relative path from project root for the file-serving endpoint
+                    rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
+                    file_url = f"/api/runs/files/{rel_path}"
+                    await _log(run_id, f"[{i+1}/{len(leads)}] PDF saved: {file_url}")
 
                 elif file_type == "email":
-                    # Read email text content
                     with open(file_path, "r", encoding="utf-8") as f:
                         content_text = f.read()
 

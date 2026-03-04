@@ -101,7 +101,10 @@ export default function Leads() {
   const pdfFile = files.find((f: any) => f.file_type === "pdf");
   const emailFile = files.find((f: any) => f.file_type === "email");
   const contactFile = files.find((f: any) => f.file_type === "contact_card");
-  const pdfUrl = pdfFile?.file_url;
+  const rawPdfUrl = pdfFile?.file_url;
+  const pdfUrl = rawPdfUrl?.startsWith("/")
+    ? `${import.meta.env.VITE_API_URL || ""}${rawPdfUrl}`
+    : rawPdfUrl;
   const emailText = emailFile?.content_text || "";
   const contactText = contactFile?.content_text || "";
 
