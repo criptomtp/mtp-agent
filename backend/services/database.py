@@ -56,10 +56,14 @@ def upload_to_storage(bucket: str, path: str, file_bytes: bytes, content_type: s
     """Upload a file to Supabase Storage. Returns public URL or None."""
     try:
         # Use service client for storage (bypasses RLS)
-        db = _get_service_client() or get_supabase()
-        db.storage.from_(bucket).upload(path, file_bytes, {"content-type": content_type, "upsert": "true"})
+        service_client = _get_service_client()
+        db = service_client or get_supabase()
+        logger.info(f"upload_to_storage: using {'service_client' if service_client else 'anon_client'}, bucket={bucket}, path={path}, size={len(file_bytes)}")
+        result = db.storage.from_(bucket).upload(path, file_bytes, {"content-type": content_type, "upsert": "true"})
+        logger.info(f"upload_to_storage: upload result={result}")
         public_url = db.storage.from_(bucket).get_public_url(path)
+        logger.info(f"upload_to_storage: public_url={public_url}")
         return public_url
     except Exception as e:
-        logger.error(f"Storage upload failed ({bucket}/{path}): {e}")
+        logger.error(f"Storage upload failed ({bucket}/{path}): {e}", exc_info=True)
         return None

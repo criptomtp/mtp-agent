@@ -31,6 +31,20 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/debug/env")
+def debug_env():
+    """Temporary endpoint to verify env vars on Railway. Remove after debugging."""
+    import os
+    service_key = os.getenv("SUPABASE_SERVICE_KEY", "")
+    return {
+        "SUPABASE_SERVICE_KEY_set": bool(service_key),
+        "SUPABASE_SERVICE_KEY_len": len(service_key),
+        "SUPABASE_SERVICE_KEY_prefix": service_key[:20] + "..." if len(service_key) > 20 else service_key,
+        "SUPABASE_URL_set": bool(os.getenv("SUPABASE_URL", "")),
+        "SUPABASE_KEY_set": bool(os.getenv("SUPABASE_KEY", "") or os.getenv("SUPABASE_ANON_KEY", "")),
+    }
+
+
 @app.websocket("/ws/logs")
 async def websocket_logs(ws: WebSocket):
     await log_manager.connect(ws)
