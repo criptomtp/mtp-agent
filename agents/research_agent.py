@@ -234,7 +234,41 @@ class ResearchAgent:
             random.shuffle(fallback_pool)
             _add_leads(fallback_pool)
 
+        # Deduplicate against existing leads in DB
+        leads = self._filter_already_contacted(leads)
+
         return leads[:count]
+
+    def _filter_already_contacted(self, leads: List[Lead]) -> List[Lead]:
+        """Filter out leads that already exist in the DB (by website, phone, or email)."""
+        try:
+            from backend.services.database import get_supabase
+            db = get_supabase()
+            existing = db.table("leads").select("website,phone,email").execute()
+            existing_websites = {r["website"] for r in existing.data if r.get("website")}
+            existing_phones = {r["phone"] for r in existing.data if r.get("phone")}
+            existing_emails = {r["email"] for r in existing.data if r.get("email")}
+
+            filtered = []
+            for lead in leads:
+                is_duplicate = False
+                if lead.website and lead.website in existing_websites:
+                    logger.info(f"[Research] Пропускаємо дублікат (website): {lead.name}")
+                    is_duplicate = True
+                elif lead.phone and lead.phone in existing_phones:
+                    logger.info(f"[Research] Пропускаємо дублікат (phone): {lead.name}")
+                    is_duplicate = True
+                elif lead.email and lead.email in existing_emails:
+                    logger.info(f"[Research] Пропускаємо дублікат (email): {lead.name}")
+                    is_duplicate = True
+                if not is_duplicate:
+                    filtered.append(lead)
+
+            logger.info(f"[Research] Після дедуплікації: {len(filtered)}/{len(leads)} нових лідів")
+            return filtered
+        except Exception as e:
+            logger.warning(f"[Research] Дедуплікація не вдалась: {e}")
+            return leads
 
     def _search_prom(self, count: int) -> List[Lead]:
         """Парсинг продавців косметики з Prom.ua з enrichment."""
