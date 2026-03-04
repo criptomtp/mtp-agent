@@ -1,0 +1,7 @@
+requests
+beautifulsoup4
+lxml
+python-dotenv
+reportlab
+google-generativeai
+anthropic
