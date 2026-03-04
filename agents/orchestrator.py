@@ -16,8 +16,8 @@ from .outreach_agent import OutreachAgent
 class Orchestrator:
     """Координує pipeline: Research → Analysis → Content → Outreach."""
 
-    def __init__(self, send_email: bool = False, api_keys: Optional[Dict[str, str]] = None, tariffs: Optional[List[Dict[str, Any]]] = None):
-        self.research = ResearchAgent(api_keys=api_keys)
+    def __init__(self, send_email: bool = False, api_keys: Optional[Dict[str, str]] = None, tariffs: Optional[List[Dict[str, Any]]] = None, channels: Optional[List[str]] = None):
+        self.research = ResearchAgent(api_keys=api_keys, channels=channels)
         self.analysis = AnalysisAgent(api_keys=api_keys)
         self.content = ContentAgent()
         self.outreach = OutreachAgent()

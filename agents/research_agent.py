@@ -38,15 +38,22 @@ def _normalize_name(name: str) -> str:
 
 
 class ResearchAgent:
-    """Шукає потенційних клієнтів косметики на Prom.ua та Google Maps."""
+    """Шукає потенційних клієнтів косметики з багатьох джерел."""
 
     PROM_SEARCH_URL = "https://prom.ua/search?search_term={query}"
     PROM_COMPANY_URL = "https://prom.ua/c{company_id}"
     GOOGLE_MAPS_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
     GOOGLE_PLACE_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+    GOOGLE_CUSTOM_SEARCH_URL = "https://www.googleapis.com/customsearch/v1"
+    OLX_SEARCH_URL = "https://www.olx.ua/d/uk/q-{query}/"
+    INSTAGRAM_GRAPH_URL = "https://graph.facebook.com/v19.0"
 
-    def __init__(self, api_keys: Optional[dict] = None):
+    # All available search channels
+    ALL_CHANNELS = ["google_maps", "google_search", "prom", "olx", "instagram", "facebook"]
+
+    def __init__(self, api_keys: Optional[dict] = None, channels: Optional[List[str]] = None):
         self._api_keys = api_keys or {}
+        self._channels = channels or self.ALL_CHANNELS
 
     HEADERS = {
         "User-Agent": (
@@ -170,8 +177,9 @@ class ResearchAgent:
         ),
     ]
 
-    def search(self, count: int = 5) -> List[Lead]:
-        """Шукає лідів з усіх джерел, повертає до count результатів."""
+    def search(self, count: int = 5, channels: Optional[List[str]] = None) -> List[Lead]:
+        """Шукає лідів з вибраних джерел, повертає до count результатів."""
+        active_channels = channels or self._channels
         leads: List[Lead] = []
         seen_names: set = set()
 
@@ -183,29 +191,38 @@ class ResearchAgent:
             leads.append(lead)
             return True
 
-        # Prom.ua — targeted queries
-        prom_leads = self._search_prom(count * 2)  # fetch extra for dedup
-        for lead in prom_leads:
-            if len(leads) >= count:
-                break
-            _add_lead(lead)
-
-        # Google Maps
-        if len(leads) < count:
-            maps_leads = self._search_google_maps(count - len(leads))
-            for lead in maps_leads:
+        def _add_leads(new_leads: List[Lead]):
+            for lead in new_leads:
                 if len(leads) >= count:
                     break
                 _add_lead(lead)
+
+        # Channel dispatch — order matters for priority
+        remaining = lambda: count - len(leads)
+        channel_methods = {
+            "prom": lambda: self._search_prom(remaining()),
+            "google_maps": lambda: self._search_google_maps(remaining()),
+            "google_search": lambda: self._search_google_custom(remaining()),
+            "olx": lambda: self._search_olx(remaining()),
+            "instagram": lambda: self._search_instagram(remaining()),
+            "facebook": lambda: self._search_facebook(remaining()),
+        }
+
+        for channel in active_channels:
+            if len(leads) >= count:
+                break
+            method = channel_methods.get(channel)
+            if method:
+                try:
+                    _add_leads(method())
+                except Exception as e:
+                    logger.warning(f"[ResearchAgent] Channel {channel} failed: {e}")
 
         # Fallback
         if len(leads) < count:
             fallback_pool = list(self.FALLBACK_LEADS)
             random.shuffle(fallback_pool)
-            for lead in fallback_pool:
-                if len(leads) >= count:
-                    break
-                _add_lead(lead)
+            _add_leads(fallback_pool)
 
         return leads[:count]
 
@@ -419,3 +436,343 @@ class ResearchAgent:
 
         except Exception as e:
             logger.debug(f"[ResearchAgent] Website scrape failed for {lead.name}: {e}")
+
+    # ── Google Custom Search ─────────────────────────────────────────
+
+    GOOGLE_SEARCH_QUERIES = [
+        "косметика інтернет-магазин Україна",
+        "натуральна косметика купити",
+        "косметика оптом Україна",
+        "виробник косметики Україна",
+        '"Працює на Horoshop" косметика',
+    ]
+
+    def _search_google_custom(self, count: int) -> List[Lead]:
+        """Пошук через Google Custom Search JSON API."""
+        api_key = self._api_keys.get("GOOGLE_CUSTOM_SEARCH_API_KEY") or os.getenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
+        cx = self._api_keys.get("GOOGLE_CUSTOM_SEARCH_CX") or os.getenv("GOOGLE_CUSTOM_SEARCH_CX")
+        if not api_key or not cx:
+            logger.info("[ResearchAgent] Google Custom Search не налаштований, пропускаю.")
+            return []
+
+        leads = []
+        for query in self.GOOGLE_SEARCH_QUERIES:
+            if len(leads) >= count:
+                break
+            try:
+                resp = requests.get(
+                    self.GOOGLE_CUSTOM_SEARCH_URL,
+                    params={"key": api_key, "cx": cx, "q": query, "num": min(10, count), "lr": "lang_uk"},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                for item in data.get("items", []):
+                    link = item.get("link", "")
+                    title = item.get("title", "")
+                    snippet = item.get("snippet", "")
+
+                    # Skip aggregators and marketplaces
+                    if any(skip in link for skip in ["prom.ua", "rozetka.com", "makeup.com.ua", "olx.ua", "facebook.com", "instagram.com"]):
+                        continue
+
+                    # Extract domain as company name fallback
+                    from urllib.parse import urlparse
+                    domain = urlparse(link).netloc.replace("www.", "")
+                    name = title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                    if not name or len(name) < 3:
+                        name = domain
+
+                    lead = Lead(
+                        name=name,
+                        website=link,
+                        description=f"Google Search: {snippet[:150]}",
+                        source="google_search",
+                    )
+                    self._scrape_contact_from_website(lead)
+                    leads.append(lead)
+
+                    if len(leads) >= count:
+                        break
+
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] Google Custom Search ({query}): {e}")
+                continue
+
+        return leads
+
+    # ── OLX ───────────────────────────────────────────────────────────
+
+    OLX_QUERIES = [
+        "косметика оптом",
+        "косметика виробник",
+        "натуральна косметика",
+    ]
+
+    def _search_olx(self, count: int) -> List[Lead]:
+        """Парсинг бізнес-профілів з OLX.ua."""
+        leads = []
+        seen_sellers: set = set()
+
+        for query in self.OLX_QUERIES:
+            if len(leads) >= count:
+                break
+            try:
+                url = self.OLX_SEARCH_URL.format(query=query.replace(" ", "-"))
+                resp = requests.get(url, headers=self.HEADERS, timeout=10)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "lxml")
+
+                # OLX listing cards
+                cards = soup.select("[data-cy='l-card']")
+                for card in cards:
+                    if len(leads) >= count:
+                        break
+
+                    # Seller name
+                    seller_el = card.select_one("[data-testid='seller-name'], .css-1lcz6o7")
+                    if not seller_el:
+                        continue
+                    seller_name = seller_el.get_text(strip=True)
+                    if not seller_name or seller_name in seen_sellers:
+                        continue
+                    seen_sellers.add(seller_name)
+
+                    # Listing title for description
+                    title_el = card.select_one("h6, [data-cy='ad-card-title']")
+                    title = title_el.get_text(strip=True) if title_el else ""
+
+                    # Location
+                    loc_el = card.select_one("[data-testid='location-date'], .css-veheph")
+                    city = ""
+                    if loc_el:
+                        loc_text = loc_el.get_text(strip=True)
+                        city = loc_text.split("-")[0].split(",")[0].strip()
+
+                    # Link to listing (to scrape seller page)
+                    link_el = card.select_one("a[href]")
+                    listing_url = ""
+                    if link_el:
+                        href = link_el.get("href", "")
+                        listing_url = href if href.startswith("http") else f"https://www.olx.ua{href}"
+
+                    lead = Lead(
+                        name=seller_name,
+                        city=city,
+                        description=f"OLX: {title[:150]}",
+                        source="olx",
+                    )
+
+                    # Try to get phone from listing page
+                    if listing_url:
+                        self._enrich_from_olx_listing(lead, listing_url)
+
+                    leads.append(lead)
+
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] OLX ({query}): {e}")
+                continue
+
+        return leads
+
+    def _enrich_from_olx_listing(self, lead: Lead, listing_url: str):
+        """Extract contacts from OLX listing page."""
+        try:
+            resp = requests.get(listing_url, headers=self.HEADERS, timeout=10)
+            resp.raise_for_status()
+            html = resp.text
+
+            # Phone patterns in page text
+            if not lead.phone:
+                phones = re.findall(r"\+380\d{9}", html)
+                if not phones:
+                    phones = re.findall(r"(?<!\d)0\d{9}(?!\d)", html)
+                if phones:
+                    lead.phone = phones[0] if phones[0].startswith("+") else f"+38{phones[0]}"
+
+            # Sometimes seller has a website link
+            soup = BeautifulSoup(html, "lxml")
+            for a in soup.select("a[href]"):
+                href = a.get("href", "")
+                if href.startswith("http") and not any(x in href for x in ["olx.ua", "facebook.com", "google.", "apple."]):
+                    if "." in href and len(href) > 10:
+                        lead.website = href
+                        self._scrape_contact_from_website(lead)
+                        break
+
+        except Exception as e:
+            logger.debug(f"[ResearchAgent] OLX enrichment failed for {lead.name}: {e}")
+
+    # ── Instagram ─────────────────────────────────────────────────────
+
+    INSTAGRAM_HASHTAGS = [
+        "косметикаукраїна",
+        "натуральнакосметика",
+        "українськакосметика",
+        "косметикаоптом",
+    ]
+
+    def _search_instagram(self, count: int) -> List[Lead]:
+        """Пошук бізнес-акаунтів через Instagram Graph API."""
+        access_token = self._api_keys.get("INSTAGRAM_ACCESS_TOKEN") or os.getenv("INSTAGRAM_ACCESS_TOKEN")
+        if not access_token:
+            logger.info("[ResearchAgent] Instagram access token не налаштований, пропускаю.")
+            return []
+
+        leads = []
+        seen_users: set = set()
+
+        for hashtag_name in self.INSTAGRAM_HASHTAGS:
+            if len(leads) >= count:
+                break
+            try:
+                # Step 1: Get hashtag ID
+                resp = requests.get(
+                    f"{self.INSTAGRAM_GRAPH_URL}/ig_hashtag_search",
+                    params={"q": hashtag_name, "access_token": access_token},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                hashtag_data = resp.json().get("data", [])
+                if not hashtag_data:
+                    continue
+                hashtag_id = hashtag_data[0]["id"]
+
+                # Step 2: Get recent media for hashtag
+                resp = requests.get(
+                    f"{self.INSTAGRAM_GRAPH_URL}/{hashtag_id}/recent_media",
+                    params={
+                        "fields": "caption,permalink",
+                        "access_token": access_token,
+                        "limit": 50,
+                    },
+                    timeout=10,
+                )
+                resp.raise_for_status()
+
+                for media in resp.json().get("data", []):
+                    if len(leads) >= count:
+                        break
+
+                    caption = media.get("caption", "") or ""
+                    permalink = media.get("permalink", "")
+
+                    # Extract username from permalink
+                    # Format: https://www.instagram.com/p/XXX/ or /username/
+                    username = ""
+                    if "/p/" in permalink:
+                        parts = permalink.rstrip("/").split("/")
+                        # Try to get from media owner via API
+                        pass
+                    else:
+                        parts = permalink.rstrip("/").split("/")
+                        if len(parts) >= 4:
+                            username = parts[3]
+
+                    if not username or username in seen_users:
+                        continue
+                    seen_users.add(username)
+
+                    # Extract contacts from bio/caption
+                    email = ""
+                    phone = ""
+                    website = ""
+
+                    emails = re.findall(r"[\w.-]+@[\w.-]+\.\w+", caption)
+                    if emails:
+                        email = emails[0]
+
+                    phones = re.findall(r"\+380\d{9}", caption)
+                    if phones:
+                        phone = phones[0]
+
+                    # Look for URLs in caption
+                    urls = re.findall(r"https?://[\w./\-?=&]+", caption)
+                    for url in urls:
+                        if "instagram.com" not in url and "facebook.com" not in url:
+                            website = url
+                            break
+
+                    lead = Lead(
+                        name=username,
+                        email=email,
+                        phone=phone,
+                        website=website,
+                        description=f"Instagram: {caption[:150]}",
+                        source="instagram",
+                    )
+
+                    if lead.website:
+                        self._scrape_contact_from_website(lead)
+
+                    leads.append(lead)
+
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] Instagram ({hashtag_name}): {e}")
+                continue
+
+        return leads
+
+    # ── Facebook Pages ────────────────────────────────────────────────
+
+    def _search_facebook(self, count: int) -> List[Lead]:
+        """Пошук бізнес-сторінок через Facebook Graph API."""
+        access_token = self._api_keys.get("FACEBOOK_ACCESS_TOKEN") or os.getenv("FACEBOOK_ACCESS_TOKEN")
+        if not access_token:
+            logger.info("[ResearchAgent] Facebook access token не налаштований, пропускаю.")
+            return []
+
+        leads = []
+        queries = ["косметика Україна", "натуральна косметика", "cosmetics Ukraine"]
+
+        for query in queries:
+            if len(leads) >= count:
+                break
+            try:
+                resp = requests.get(
+                    f"{self.INSTAGRAM_GRAPH_URL}/pages/search",
+                    params={
+                        "q": query,
+                        "fields": "name,website,phone,emails,location,about",
+                        "access_token": access_token,
+                        "limit": 25,
+                    },
+                    timeout=10,
+                )
+                resp.raise_for_status()
+
+                for page in resp.json().get("data", []):
+                    if len(leads) >= count:
+                        break
+
+                    name = page.get("name", "")
+                    if not name:
+                        continue
+
+                    location = page.get("location", {})
+                    city = location.get("city", "") if location else ""
+
+                    emails_list = page.get("emails", [])
+                    email = emails_list[0] if emails_list else ""
+
+                    lead = Lead(
+                        name=name,
+                        website=page.get("website", ""),
+                        email=email,
+                        phone=page.get("phone", ""),
+                        city=city,
+                        description=f"Facebook: {page.get('about', '')[:150]}",
+                        source="facebook",
+                    )
+
+                    if lead.website:
+                        self._scrape_contact_from_website(lead)
+
+                    leads.append(lead)
+
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] Facebook ({query}): {e}")
+                continue
+
+        return leads
