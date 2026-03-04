@@ -7,6 +7,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 class Settings:
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "") or os.getenv("SUPABASE_ANON_KEY", "")
+    SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "") or os.getenv("SUPABASE_SERVICE_KEY", "")
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
