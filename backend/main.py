@@ -37,8 +37,18 @@ def health():
 @app.get("/api/test-upload")
 def test_upload():
     """Temporary: test Supabase Storage upload with raw error."""
+    import traceback, base64, json as _json
+    try:
+        # Decode JWT to check role
+        key = settings.SUPABASE_SERVICE_KEY
+        parts = key.split(".")
+        payload = parts[1] + "=" * (4 - len(parts[1]) % 4) if len(parts) > 1 else ""
+        claims = _json.loads(base64.b64decode(payload)) if payload else {}
+        role = claims.get("role", "unknown")
+    except Exception:
+        role = "decode_error"
+
     from backend.services.database import get_supabase_admin
-    import traceback
     try:
         db = get_supabase_admin()
         test_data = b"%PDF-1.4 test upload from Railway"
@@ -47,9 +57,9 @@ def test_upload():
             {"content-type": "application/pdf", "upsert": "true"}
         )
         public_url = db.storage.from_("proposals").get_public_url("test/railway_test.pdf")
-        return {"uploaded": True, "url": public_url, "result": str(result)}
+        return {"uploaded": True, "url": public_url, "role": role}
     except Exception as e:
-        return {"uploaded": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
+        return {"uploaded": False, "error": str(e), "role": role, "key_len": len(settings.SUPABASE_SERVICE_KEY)}
 
 
 @app.websocket("/ws/logs")
