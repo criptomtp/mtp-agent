@@ -49,4 +49,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ service_name, key_value }),
     }),
+
+  updateLeadStatus: (id: string, outreach_status: string) =>
+    request<any>(`/api/leads/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ outreach_status }),
+    }),
 };

@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from backend.services.database import get_supabase
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
+
+
+class StatusUpdate(BaseModel):
+    outreach_status: str
 
 
 @router.get("/")
@@ -33,6 +38,18 @@ def get_lead(lead_id: str):
         .execute()
     )
     return {**lead.data, "files": files.data}
+
+
+@router.patch("/{lead_id}/status")
+def update_lead_status(lead_id: str, body: StatusUpdate):
+    db = get_supabase()
+    result = (
+        db.table("leads")
+        .update({"outreach_status": body.outreach_status})
+        .eq("id", lead_id)
+        .execute()
+    )
+    return result.data[0] if result.data else {"error": "not found"}
 
 
 @router.get("/{lead_id}/files")
