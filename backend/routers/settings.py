@@ -135,12 +135,23 @@ def test_lead(body: TestLeadIn):
     # Upload PDF if generated
     pdf_url = None
     pdf_path = files.get("pdf", "")
+    logger.info(f"[test-lead] PDF path: {pdf_path}, exists: {os.path.exists(pdf_path) if pdf_path else False}")
+
+    # Check for HTML fallback too
+    if pdf_path and not os.path.exists(pdf_path):
+        html_path = pdf_path.replace(".pdf", ".html")
+        if os.path.exists(html_path):
+            logger.warning(f"[test-lead] PDF not found but HTML exists: {html_path}")
+            pdf_path = ""
+
     if pdf_path and os.path.exists(pdf_path):
         safe_name = re.sub(r"[^\w\s-]", "", body.name).strip().replace(" ", "_")[:50]
         storage_path = f"test/{safe_name}/proposal.pdf"
         with open(pdf_path, "rb") as f:
             file_bytes = f.read()
+        logger.info(f"[test-lead] Uploading PDF ({len(file_bytes)} bytes) to {storage_path}")
         pdf_url = upload_to_storage("proposals", storage_path, file_bytes)
+        logger.info(f"[test-lead] Upload result: {pdf_url}")
         if not pdf_url:
             pdf_url = None
 
