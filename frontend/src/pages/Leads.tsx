@@ -101,10 +101,9 @@ export default function Leads() {
   const htmlFile = files.find((f: any) => f.file_type === "html") || files.find((f: any) => f.file_type === "pdf");
   const emailFile = files.find((f: any) => f.file_type === "email");
   const contactFile = files.find((f: any) => f.file_type === "contact_card");
-  const rawHtmlUrl = htmlFile?.file_url;
-  const proposalUrl = rawHtmlUrl?.startsWith("/")
-    ? `${import.meta.env.VITE_API_URL || ""}${rawHtmlUrl}`
-    : rawHtmlUrl;
+  const proposalUrl = selected && htmlFile
+    ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal`
+    : null;
   const emailText = emailFile?.content_text || "";
   const contactText = contactFile?.content_text || "";
 

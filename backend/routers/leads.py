@@ -1,7 +1,13 @@
+import logging
+import re
+
 from fastapi import APIRouter, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from backend.services.database import get_supabase
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 
@@ -70,6 +76,43 @@ def update_lead_status(lead_id: str, body: StatusUpdate):
         .execute()
     )
     return result.data[0] if result.data else {"error": "not found"}
+
+
+@router.get("/{lead_id}/proposal", response_class=HTMLResponse)
+async def get_lead_proposal(lead_id: str):
+    try:
+        sb = get_supabase()
+
+        lead = sb.table("leads").select("*").eq("id", lead_id).single().execute()
+        if not lead.data:
+            return HTMLResponse("<h1>Лід не знайдений</h1>", status_code=404)
+
+        lead_data = lead.data
+        safe_name = re.sub(r"[^\w\s-]", "", lead_data.get("name", "")).strip().replace(" ", "_")[:50]
+        run_id = lead_data.get("run_id", "test")
+
+        # Also check generated_files table for the stored file_url
+        files = sb.table("generated_files").select("file_url").eq("lead_id", lead_id).in_("file_type", ["html", "pdf"]).execute()
+        storage_paths = [f"{run_id}/{lead_id}/proposal.html", f"test/{safe_name}/proposal.html"]
+
+        html_content = None
+        for path in storage_paths:
+            try:
+                response = sb.storage.from_("proposals").download(path)
+                if response:
+                    html_content = response.decode("utf-8")
+                    break
+            except Exception:
+                continue
+
+        if not html_content:
+            return HTMLResponse("<h1>Презентація не знайдена</h1>", status_code=404)
+
+        return HTMLResponse(content=html_content, status_code=200)
+
+    except Exception as e:
+        logger.error(f"Proposal fetch error: {e}")
+        return HTMLResponse(f"<h1>Помилка: {e}</h1>", status_code=500)
 
 
 @router.get("/{lead_id}/files")
