@@ -202,7 +202,7 @@ class AnalysisAgent:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
             system_prompt, user_prompt = _build_prompt(lead, tariffs_text, website_data)
-            model = genai.GenerativeModel("gemini-2.0-flash", system_instruction=system_prompt)
+            model = genai.GenerativeModel("gemini-2.5-flash", system_instruction=system_prompt)
             response = model.generate_content(user_prompt)
             text = response.text.strip()
             if text.startswith("```"):
