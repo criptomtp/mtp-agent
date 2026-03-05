@@ -383,18 +383,116 @@ class ContentAgent:
         return html
 
     def _generate_pdf(self, lead: Lead, analysis: Dict[str, Any], path: str, tariffs=None):
-        """Generate PDF from HTML using WeasyPrint."""
+        """Generate PDF from HTML using WeasyPrint, fallback to ReportLab."""
         html = self._generate_html_proposal(lead, analysis, tariffs)
 
         try:
             from weasyprint import HTML
             HTML(string=html).write_pdf(path)
+            logger.info(f"PDF generated via WeasyPrint: {path}")
         except Exception as e:
-            logger.error(f"WeasyPrint failed: {e}, falling back to HTML file")
-            # Save as HTML fallback
-            html_path = path.replace(".pdf", ".html")
-            with open(html_path, "w", encoding="utf-8") as f:
-                f.write(html)
+            logger.warning(f"WeasyPrint failed: {e}, falling back to ReportLab")
+            self._generate_pdf_reportlab(lead, analysis, path, tariffs)
+
+    def _generate_pdf_reportlab(self, lead: Lead, analysis: Dict[str, Any], path: str, tariffs=None):
+        """Fallback PDF generation using ReportLab."""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.colors import HexColor
+        from reportlab.lib.units import mm
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        BLUE = HexColor("#1B3A6B")
+        ORANGE = HexColor("#E8730A")
+        WHITE = HexColor("#FFFFFF")
+        LIGHT_GRAY = HexColor("#F5F5F5")
+        DARK_TEXT = HexColor("#333333")
+
+        # Register font
+        font = "Helvetica"
+        font_bold = "Helvetica-Bold"
+        font_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+            os.path.join(os.path.dirname(__file__), "..", "fonts", "DejaVuSans.ttf"),
+        ]
+        for fp in font_paths:
+            if os.path.exists(fp):
+                try:
+                    pdfmetrics.registerFont(TTFont("DejaVuSans", fp))
+                    bold_fp = fp.replace("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
+                    if os.path.exists(bold_fp):
+                        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_fp))
+                    font = "DejaVuSans"
+                    font_bold = "DejaVuSans-Bold" if os.path.exists(bold_fp) else font
+                except Exception:
+                    pass
+                break
+
+        doc = SimpleDocTemplate(path, pagesize=A4, topMargin=15*mm, bottomMargin=15*mm, leftMargin=20*mm, rightMargin=20*mm)
+        styles = getSampleStyleSheet()
+        s_title = ParagraphStyle("T", parent=styles["Title"], fontName=font_bold, fontSize=22, textColor=BLUE, alignment=TA_CENTER, spaceAfter=2*mm)
+        s_subtitle = ParagraphStyle("S", parent=styles["Normal"], fontName=font, fontSize=11, textColor=ORANGE, alignment=TA_CENTER, spaceAfter=6*mm)
+        s_hook = ParagraphStyle("H", parent=styles["Title"], fontName=font_bold, fontSize=18, textColor=ORANGE, alignment=TA_CENTER, spaceBefore=4*mm, spaceAfter=6*mm)
+        s_heading = ParagraphStyle("Hd", parent=styles["Heading2"], fontName=font_bold, fontSize=14, textColor=BLUE, spaceBefore=6*mm, spaceAfter=3*mm)
+        s_body = ParagraphStyle("B", parent=styles["Normal"], fontName=font, fontSize=10, textColor=DARK_TEXT, leading=14, alignment=TA_JUSTIFY, spaceAfter=2*mm)
+        s_pain_title = ParagraphStyle("PT", parent=styles["Normal"], fontName=font_bold, fontSize=10, textColor=ORANGE, spaceAfter=1*mm)
+        s_benefit = ParagraphStyle("BN", parent=styles["Normal"], fontName=font_bold, fontSize=10, textColor=BLUE, spaceAfter=1*mm)
+        s_accent = ParagraphStyle("A", parent=styles["Normal"], fontName=font_bold, fontSize=12, textColor=ORANGE, alignment=TA_CENTER, spaceAfter=2*mm)
+        s_footer = ParagraphStyle("F", parent=styles["Normal"], fontName=font, fontSize=9, textColor=BLUE, alignment=TA_CENTER)
+        s_contact = ParagraphStyle("C", parent=styles["Normal"], fontName=font, fontSize=9, textColor=DARK_TEXT, alignment=TA_CENTER, spaceAfter=1*mm)
+
+        elements = []
+        elements.append(Paragraph("MTP Fulfillment", s_title))
+        elements.append(Paragraph(f"Комерцiйна пропозицiя для {lead.name}", s_subtitle))
+        elements.append(HRFlowable(width="100%", thickness=2, color=ORANGE, spaceAfter=4*mm))
+        elements.append(Paragraph(analysis.get("hook", f"{lead.name}: час масштабуватись"), s_hook))
+
+        ci = analysis.get("client_insight", "")
+        if ci:
+            elements.append(Paragraph("Ми розумiємо вашу специфiку", s_heading))
+            elements.append(Paragraph(ci, s_body))
+
+        for pain in analysis.get("pain_points", []):
+            if isinstance(pain, dict):
+                elements.append(Paragraph(f"▸ {pain.get('title', '')}", s_pain_title))
+                elements.append(Paragraph(pain.get("description", ""), s_body))
+
+        mtp_fit = analysis.get("mtp_fit", "")
+        if mtp_fit:
+            elements.append(Paragraph("Чому МТП", s_heading))
+            elements.append(Paragraph(mtp_fit, s_body))
+        for kb in analysis.get("key_benefits", []):
+            if isinstance(kb, dict):
+                elements.append(Paragraph(f"✓ {kb.get('benefit', '')}", s_benefit))
+                elements.append(Paragraph(kb.get("proof", ""), s_body))
+
+        # Tariffs
+        elements.append(Paragraph("Тарифи MTP Fulfillment", s_heading))
+        tariff_rows = [["Послуга", "Тариф"]] + [list(r) for r in _build_tariffs_rows(tariffs)]
+        table = Table(tariff_rows, colWidths=[100*mm, 60*mm])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BLUE), ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+            ("FONTNAME", (0, 0), (-1, 0), font_bold), ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("FONTNAME", (0, 1), (-1, -1), font), ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [LIGHT_GRAY, WHITE]),
+            ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CCCCCC")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(table)
+
+        # CTA
+        elements.append(Spacer(1, 6*mm))
+        elements.append(Paragraph(analysis.get("zoom_cta", "Zoom-консультацiя"), s_accent))
+        elements.append(Spacer(1, 4*mm))
+        for c in ["mtpgrouppromo@gmail.com | +38 (050) 144-46-45", "fulfillmentmtp.com.ua | @nikolay_mtp"]:
+            elements.append(Paragraph(c, s_contact))
+        elements.append(Paragraph("© MTP Fulfillment — 7+ рокiв, 60 000+ вiдправок/мiс", s_footer))
+        doc.build(elements)
+        logger.info(f"PDF generated via ReportLab fallback: {path}")
 
     def _generate_email(self, lead: Lead, analysis: Dict[str, Any], path: str):
         subject = analysis.get("email_subject", f"{lead.name}, пропозиція від MTP Fulfillment")
