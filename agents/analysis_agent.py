@@ -47,8 +47,8 @@ def _format_tariffs_for_prompt(tariffs: Optional[List[Dict[str, Any]]]) -> str:
     return json.dumps(HARDCODED_TARIFFS, ensure_ascii=False, indent=2)
 
 
-def _scrape_website(url: str) -> Dict[str, str]:
-    """Fetch title, meta description, and text excerpt from a website."""
+def _scrape_website(url: str) -> Dict[str, Any]:
+    """Deep scrape: title, meta, text, colors, products, prices, social, tone, brand keywords."""
     if not url or not url.startswith("http"):
         return {}
     try:
@@ -61,36 +61,132 @@ def _scrape_website(url: str) -> Dict[str, str]:
             allow_redirects=True,
         )
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "lxml")
+        html = resp.text
+        soup = BeautifulSoup(html, "lxml")
 
-        title = ""
-        if soup.title:
-            title = soup.title.get_text(strip=True)
+        # Title
+        title = soup.title.get_text(strip=True) if soup.title else ""
 
+        # Meta description
         meta_desc = ""
         meta_tag = soup.find("meta", attrs={"name": "description"})
         if meta_tag and meta_tag.get("content"):
             meta_desc = meta_tag["content"].strip()
 
-        # Extract visible text excerpt
+        # Social links
+        social = {}
+        for a in soup.select("a[href]"):
+            href = (a.get("href") or "").lower()
+            if "instagram.com" in href and "instagram" not in social:
+                social["instagram"] = a["href"]
+            elif "facebook.com" in href and "facebook" not in social:
+                social["facebook"] = a["href"]
+            elif "t.me/" in href and "telegram" not in social:
+                social["telegram"] = a["href"]
+
+        # Colors from inline styles and style tags
+        colors = []
+        color_pattern = re.compile(r'(?:background-color|color|border-color)\s*:\s*(#[0-9a-fA-F]{3,8}|rgb[a]?\([^)]+\))', re.I)
+        # From style attributes
+        for el in soup.select("[style]"):
+            style = el.get("style", "")
+            for match in color_pattern.findall(style):
+                if match not in colors and match.lower() not in ("#fff", "#ffffff", "#000", "#000000", "rgb(255, 255, 255)", "rgb(0, 0, 0)"):
+                    colors.append(match)
+        # From <style> tags
+        for style_tag in soup.select("style"):
+            for match in color_pattern.findall(style_tag.get_text()):
+                if match not in colors and match.lower() not in ("#fff", "#ffffff", "#000", "#000000"):
+                    colors.append(match)
+        colors = colors[:5]
+
+        # Products — find product names from common selectors
+        products = []
+        product_selectors = [
+            "[class*=product] h2", "[class*=product] h3", "[class*=product-title]",
+            "[class*=item] h2", "[class*=item] h3", "[class*=card] h3",
+            ".product-name", ".product__name", ".product__title",
+            "h2.title", "h3.title",
+        ]
+        for sel in product_selectors:
+            for el in soup.select(sel)[:10]:
+                name = el.get_text(strip=True)
+                if name and len(name) > 3 and name not in products:
+                    products.append(name)
+            if len(products) >= 10:
+                break
+        products = products[:10]
+
+        # Price range
+        price_pattern = re.compile(r'(\d[\d\s]*(?:\.\d{1,2})?)\s*(?:грн|₴|UAH|uah)', re.I)
+        prices = []
+        for match in price_pattern.findall(soup.get_text()):
+            try:
+                val = float(match.replace(" ", "").replace("\u00a0", ""))
+                if 1 < val < 1_000_000:
+                    prices.append(val)
+            except ValueError:
+                pass
+        price_range = ""
+        if prices:
+            price_range = f"{int(min(prices))} - {int(max(prices))} грн"
+
+        # Clean text excerpt
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
         text = soup.get_text(separator=" ", strip=True)[:2000]
 
-        return {"title": title, "meta_description": meta_desc, "text_excerpt": text}
+        # Tone detection (informal vs formal)
+        informal_words = ["ти ", "твій", "твоя", "твоє", "обирай", "замовляй", "спробуй", "дивись"]
+        text_lower = text.lower()
+        informal_count = sum(1 for w in informal_words if w in text_lower)
+        tone = "неформальний" if informal_count >= 2 else "формальний"
+
+        # Brand keywords from title + meta description
+        brand_text = f"{title} {meta_desc}"
+        brand_words = [w for w in brand_text.split() if len(w) > 3]
+        brand_keywords = brand_words[:20]
+
+        return {
+            "title": title,
+            "meta_description": meta_desc,
+            "text_excerpt": text,
+            "colors": colors,
+            "products": products,
+            "price_range": price_range,
+            "social": social,
+            "tone": tone,
+            "brand_keywords": brand_keywords,
+        }
     except Exception as e:
         logger.debug(f"Website scrape failed for {url}: {e}")
         return {}
 
 
-def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, str]) -> tuple:
+def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any]) -> tuple:
     """Returns (system_prompt, user_prompt) for the AI analysis."""
     website_section = "Немає даних"
     if website_data:
         title = website_data.get("title", "н/д")
         meta = website_data.get("meta_description", "н/д")
         text = website_data.get("text_excerpt", "н/д")[:800]
+        products = website_data.get("products", [])
+        price_range = website_data.get("price_range", "")
+        social = website_data.get("social", {})
+        tone = website_data.get("tone", "")
+        colors = website_data.get("colors", [])
+
         website_section = f"Заголовок: {title}\nМета-опис: {meta}\nТекст сайту: {text}"
+        if products:
+            website_section += f"\nТовари на сайті: {', '.join(products[:5])}"
+        if price_range:
+            website_section += f"\nДіапазон цін: {price_range}"
+        if social:
+            website_section += f"\nСоц. мережі: {', '.join(f'{k}: {v}' for k, v in social.items())}"
+        if tone:
+            website_section += f"\nТон комунікації: {tone}"
+        if colors:
+            website_section += f"\nОсновні кольори сайту: {', '.join(colors[:3])}"
 
     system_prompt = (
         "Ти досвідчений B2B маркетолог і копірайтер. Пишеш українською мовою. "

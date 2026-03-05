@@ -1,47 +1,32 @@
 """ContentAgent — генерація PDF комерційної пропозиції та email тексту."""
 
 import os
+import re
+import logging
 from typing import Dict, Any
 from datetime import datetime
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.colors import HexColor
-from reportlab.lib.units import mm
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
-)
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-
 from .research_agent import Lead
 
-# Корпоративні кольори
-BLUE = HexColor("#1B3A6B")
-ORANGE = HexColor("#E8730A")
-WHITE = HexColor("#FFFFFF")
-LIGHT_GRAY = HexColor("#F5F5F5")
-DARK_TEXT = HexColor("#333333")
+logger = logging.getLogger(__name__)
 
 HARDCODED_TARIFFS_TABLE = [
-    ["Послуга", "Тариф"],
-    ["Прийом товару", "2 грн / одиниця"],
-    ["Зберігання (паллет)", "800 грн / місяць"],
-    ["Зберігання (коробка)", "80 грн / місяць"],
-    ["Комплектація B2C (1-3 од.)", "22 грн / замовлення"],
-    ["Комплектація B2B", "45 грн / замовлення"],
-    ["Пакування", "8 грн / замовлення"],
-    ["Відправка Новою Поштою", "за тарифом НП"],
+    ("Прийом товару", "2 грн / одиниця"),
+    ("Зберігання (паллет)", "800 грн / місяць"),
+    ("Зберігання (коробка)", "80 грн / місяць"),
+    ("Комплектація B2C (1-3 од.)", "22 грн / замовлення"),
+    ("Комплектація B2B", "45 грн / замовлення"),
+    ("Пакування", "8 грн / замовлення"),
+    ("Відправка Новою Поштою", "за тарифом НП"),
 ]
 
 
-def _build_tariffs_table(tariffs=None):
-    """Build tariff table rows from DB tariffs or fallback to hardcoded."""
+def _build_tariffs_rows(tariffs=None):
+    """Build tariff rows from DB tariffs or fallback to hardcoded."""
     if not tariffs:
         return HARDCODED_TARIFFS_TABLE
 
-    rows = [["Послуга", "Тариф"]]
+    rows = []
     for t in tariffs:
         name = t["service_name"]
         price = t["price"]
@@ -53,69 +38,20 @@ def _build_tariffs_table(tariffs=None):
             tariff_str = note
         else:
             continue
-        rows.append([name, tariff_str])
-    return rows if len(rows) > 1 else HARDCODED_TARIFFS_TABLE
+        rows.append((name, tariff_str))
+    return rows if rows else HARDCODED_TARIFFS_TABLE
 
 
-def _register_cyrillic_font() -> str:
-    """Реєстрація DejaVu шрифтів для кирилиці з автозавантаженням."""
-    search_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/Library/Fonts/DejaVuSans.ttf",
-        os.path.expanduser("~/Library/Fonts/DejaVuSans.ttf"),
-        os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf"),
-        os.path.join(os.path.dirname(__file__), "..", "fonts", "DejaVuSans.ttf"),
-    ]
-
-    for path in search_paths:
-        if os.path.exists(path):
-            bold_path = path.replace("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
-            pdfmetrics.registerFont(TTFont("DejaVuSans", path))
-            if os.path.exists(bold_path):
-                pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
-            return "DejaVuSans"
-
-    # Автозавантаження якщо не знайдено
-    fonts_dir = os.path.join(os.path.dirname(__file__), "..", "fonts")
-    os.makedirs(fonts_dir, exist_ok=True)
-    font_path = os.path.join(fonts_dir, "DejaVuSans.ttf")
-    bold_path = os.path.join(fonts_dir, "DejaVuSans-Bold.ttf")
-
-    if not os.path.exists(font_path):
-        import urllib.request, zipfile, tempfile
-        print("[ContentAgent] Завантаження DejaVuSans шрифту...")
-        zip_url = "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip"
-        zip_path = os.path.join(tempfile.gettempdir(), "dejavu.zip")
-        urllib.request.urlretrieve(zip_url, zip_path)
-        with zipfile.ZipFile(zip_path) as z:
-            for name in z.namelist():
-                basename = os.path.basename(name)
-                if basename in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"):
-                    with open(os.path.join(fonts_dir, basename), "wb") as f:
-                        f.write(z.read(name))
-
-    pdfmetrics.registerFont(TTFont("DejaVuSans", font_path))
-    if os.path.exists(bold_path):
-        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
-    return "DejaVuSans"
-
-
-FONT_NAME = _register_cyrillic_font()
-FONT_BOLD = "DejaVuSans-Bold"
-
-
-def _get_font_name(bold: bool = False) -> str:
-    """Повертає назву шрифту."""
-    return FONT_BOLD if bold else FONT_NAME
+def _escape_html(text: str) -> str:
+    """Escape HTML special characters."""
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 class ContentAgent:
     """Генерує PDF КП та email текст."""
 
     def __init__(self):
-        self._fonts_registered = bool(FONT_NAME)
+        pass
 
     def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str, tariffs=None) -> Dict[str, str]:
         """Генерує PDF та email.txt. Повертає шляхи до файлів."""
@@ -129,196 +65,340 @@ class ContentAgent:
 
         return {"pdf": pdf_path, "email": email_path}
 
-    def _generate_pdf(self, lead: Lead, analysis: Dict[str, Any], path: str, tariffs=None):
-        font = _get_font_name()
-        font_bold = _get_font_name(bold=True)
+    def _generate_html_proposal(self, lead: Lead, analysis: Dict[str, Any], tariffs=None) -> str:
+        """Generate HTML string for the commercial proposal."""
+        primary = "#1a1a2e"
+        # Try to use a brand color from website scraping (stored in analysis metadata)
+        # Default to dark blue if not available
 
-        doc = SimpleDocTemplate(
-            path,
-            pagesize=A4,
-            topMargin=15 * mm,
-            bottomMargin=15 * mm,
-            leftMargin=20 * mm,
-            rightMargin=20 * mm,
-        )
+        hook = _escape_html(analysis.get("hook", f"{lead.name}: час масштабуватись"))
+        client_insight = _escape_html(analysis.get("client_insight", ""))
+        mtp_fit = _escape_html(analysis.get("mtp_fit", ""))
+        zoom_cta = _escape_html(analysis.get("zoom_cta", "Запишіться на безкоштовну Zoom-консультацію!"))
+        date_str = datetime.now().strftime("%d.%m.%Y")
+        client_name = _escape_html(lead.name)
 
-        styles = getSampleStyleSheet()
-
-        s_title = ParagraphStyle(
-            "MTPTitle", parent=styles["Title"],
-            fontName=font_bold, fontSize=22, textColor=BLUE, alignment=TA_CENTER,
-            spaceAfter=2 * mm,
-        )
-        s_subtitle = ParagraphStyle(
-            "MTPSubtitle", parent=styles["Normal"],
-            fontName=font, fontSize=11, textColor=ORANGE, alignment=TA_CENTER,
-            spaceAfter=6 * mm,
-        )
-        s_hook = ParagraphStyle(
-            "MTPHook", parent=styles["Title"],
-            fontName=font_bold, fontSize=18, textColor=ORANGE, alignment=TA_CENTER,
-            spaceBefore=4 * mm, spaceAfter=6 * mm,
-        )
-        s_heading = ParagraphStyle(
-            "MTPHeading", parent=styles["Heading2"],
-            fontName=font_bold, fontSize=14, textColor=BLUE,
-            spaceBefore=6 * mm, spaceAfter=3 * mm,
-        )
-        s_body = ParagraphStyle(
-            "MTPBody", parent=styles["Normal"],
-            fontName=font, fontSize=10, textColor=DARK_TEXT,
-            leading=14, alignment=TA_JUSTIFY, spaceAfter=2 * mm,
-        )
-        s_pain_title = ParagraphStyle(
-            "MTPPainTitle", parent=styles["Normal"],
-            fontName=font_bold, fontSize=10, textColor=ORANGE,
-            spaceAfter=1 * mm,
-        )
-        s_benefit = ParagraphStyle(
-            "MTPBenefit", parent=styles["Normal"],
-            fontName=font_bold, fontSize=10, textColor=BLUE,
-            spaceAfter=1 * mm,
-        )
-        s_accent = ParagraphStyle(
-            "MTPAccent", parent=styles["Normal"],
-            fontName=font_bold, fontSize=12, textColor=ORANGE,
-            alignment=TA_CENTER, spaceAfter=2 * mm,
-        )
-        s_footer = ParagraphStyle(
-            "MTPFooter", parent=styles["Normal"],
-            fontName=font, fontSize=9, textColor=BLUE, alignment=TA_CENTER,
-        )
-        s_contact = ParagraphStyle(
-            "MTPContact", parent=styles["Normal"],
-            fontName=font, fontSize=9, textColor=DARK_TEXT, alignment=TA_CENTER,
-            spaceAfter=1 * mm,
-        )
-
-        elements = []
-
-        # 1. Шапка MTP + назва клієнта
-        elements.append(Paragraph("MTP Fulfillment", s_title))
-        elements.append(Paragraph(
-            f"Комерцiйна пропозицiя для {lead.name}",
-            s_subtitle,
-        ))
-        elements.append(HRFlowable(
-            width="100%", thickness=2, color=ORANGE, spaceAfter=4 * mm,
-        ))
-
-        # 2. Hook
-        hook = analysis.get("hook", f"{lead.name}: час масштабуватись")
-        elements.append(Paragraph(hook, s_hook))
-
-        # 3. Ми розуміємо вашу специфіку — client_insight
-        client_insight = analysis.get("client_insight", "")
-        if client_insight:
-            elements.append(Paragraph("Ми розумiємо вашу специфiку", s_heading))
-            elements.append(Paragraph(client_insight, s_body))
-
-        # 4. Де зазвичай втрачається ефективність — pain_points
+        # Pain points HTML
         pain_points = analysis.get("pain_points", [])
-        if pain_points:
-            elements.append(Paragraph("Де зазвичай втрачається ефективнiсть", s_heading))
-            for pain in pain_points:
-                if isinstance(pain, dict):
-                    elements.append(Paragraph(f"▸ {pain.get('title', '')}", s_pain_title))
-                    elements.append(Paragraph(pain.get("description", ""), s_body))
-                else:
-                    elements.append(Paragraph(f"▸ {pain}", s_body))
+        pains_html = ""
+        for p in pain_points:
+            if isinstance(p, dict):
+                title = _escape_html(p.get("title", ""))
+                desc = _escape_html(p.get("description", ""))
+                pains_html += f"""
+                <div class="pain-item">
+                    <div class="pain-icon">&#9679;</div>
+                    <div>
+                        <div class="pain-title">{title}</div>
+                        <div class="pain-desc">{desc}</div>
+                    </div>
+                </div>"""
+            else:
+                pains_html += f"""
+                <div class="pain-item">
+                    <div class="pain-icon">&#9679;</div>
+                    <div class="pain-desc">{_escape_html(str(p))}</div>
+                </div>"""
 
-        # 5. Чому МТП — key_benefits з proof
-        mtp_fit = analysis.get("mtp_fit", "")
+        # Key benefits HTML
         key_benefits = analysis.get("key_benefits", [])
-        if mtp_fit or key_benefits:
-            elements.append(Paragraph("Чому МТП", s_heading))
-            if mtp_fit:
-                elements.append(Paragraph(mtp_fit, s_body))
-                elements.append(Spacer(1, 2 * mm))
-            for kb in key_benefits:
-                if isinstance(kb, dict):
-                    elements.append(Paragraph(f"✓ {kb.get('benefit', '')}", s_benefit))
-                    elements.append(Paragraph(kb.get("proof", ""), s_body))
+        benefits_html = ""
+        for kb in key_benefits:
+            if isinstance(kb, dict):
+                benefit = _escape_html(kb.get("benefit", ""))
+                proof = _escape_html(kb.get("proof", ""))
+                benefits_html += f"""
+                <div class="benefit-card">
+                    <div class="benefit-title">{benefit}</div>
+                    <div class="benefit-proof">{proof}</div>
+                </div>"""
+            else:
+                benefits_html += f"""
+                <div class="benefit-card">
+                    <div class="benefit-title">{_escape_html(str(kb))}</div>
+                </div>"""
 
-        # 6. Тарифна таблиця
-        elements.append(Paragraph("Тарифи MTP Fulfillment", s_heading))
-        tariffs_table_data = _build_tariffs_table(tariffs)
-        table = Table(tariffs_table_data, colWidths=[100 * mm, 60 * mm])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), BLUE),
-            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-            ("FONTNAME", (0, 0), (-1, 0), font_bold),
-            ("FONTSIZE", (0, 0), (-1, 0), 10),
-            ("FONTNAME", (0, 1), (-1, -1), font),
-            ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ("TEXTCOLOR", (0, 1), (-1, -1), DARK_TEXT),
-            ("BACKGROUND", (0, 1), (-1, -1), LIGHT_GRAY),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [LIGHT_GRAY, WHITE]),
-            ("ALIGN", (1, 0), (1, -1), "CENTER"),
-            ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CCCCCC")),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(table)
-        elements.append(Spacer(1, 4 * mm))
+        # Tariffs table rows
+        tariff_rows = _build_tariffs_rows(tariffs)
+        tariffs_html = ""
+        for i, (name, price) in enumerate(tariff_rows):
+            tariffs_html += f"""
+            <tr>
+                <td>{_escape_html(name)}</td>
+                <td>{_escape_html(price)}</td>
+            </tr>"""
 
-        # 7. Кошторис
+        # Pricing estimate
         pricing = analysis.get("pricing_estimate", {})
+        pricing_html = ""
         if pricing:
-            elements.append(Paragraph("Орiєнтовний кошторис", s_heading))
-            estimate_data = [["Стаття витрат", "Сума"]]
-            for key, val in pricing.items():
+            pricing_html = '<div class="section-title">Орієнтовний кошторис</div><table class="pricing-table">'
+            items = list(pricing.items())
+            for i, (key, val) in enumerate(items):
                 label = key.replace("_", " ").capitalize()
-                estimate_data.append([label, str(val)])
+                cls = ' class="total-row"' if i == len(items) - 1 else ""
+                pricing_html += f"<tr{cls}><td>{_escape_html(label)}</td><td>{_escape_html(str(val))}</td></tr>"
+            pricing_html += "</table>"
 
-            est_table = Table(estimate_data, colWidths=[100 * mm, 60 * mm])
-            est_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), ORANGE),
-                ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-                ("FONTNAME", (0, 0), (-1, 0), font_bold),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("FONTNAME", (0, 1), (-1, -1), font),
-                ("FONTSIZE", (0, 1), (-1, -1), 9),
-                ("BACKGROUND", (0, -1), (-1, -1), HexColor("#FFF3E6")),
-                ("FONTNAME", (0, -1), (-1, -1), font_bold),
-                ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CCCCCC")),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ]))
-            elements.append(est_table)
+        # MTP fit section
+        mtp_fit_html = f"<p>{mtp_fit}</p>" if mtp_fit else ""
 
-        # 8. CTA на Zoom
-        elements.append(Spacer(1, 6 * mm))
-        elements.append(HRFlowable(width="100%", thickness=1, color=ORANGE, spaceAfter=4 * mm))
-        zoom_cta = analysis.get("zoom_cta", "Запишiться на безкоштовну Zoom-консультацiю!")
-        elements.append(Paragraph(zoom_cta, s_accent))
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
 
-        # 9. Контакти
-        elements.append(Spacer(1, 4 * mm))
-        elements.append(Paragraph("MTP Fulfillment", ParagraphStyle(
-            "ContactTitle", parent=s_body, fontName=font_bold, fontSize=11,
-            textColor=BLUE, alignment=TA_CENTER,
-        )))
-        for c in [
-            "mtpgrouppromo@gmail.com | +38 (050) 144-46-45",
-            "fulfillmentmtp.com.ua | @nikolay_mtp",
-        ]:
-            elements.append(Paragraph(c, s_contact))
+  @page {{
+    size: A4;
+    margin: 0;
+  }}
 
-        elements.append(Spacer(1, 6 * mm))
-        elements.append(Paragraph(
-            "© MTP Fulfillment — 7+ рокiв на ринку, 60 000+ вiдправок на мiсяць",
-            s_footer,
-        ))
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 
-        doc.build(elements)
+  body {{
+    font-family: 'Inter', 'DejaVu Sans', sans-serif;
+    background: #ffffff;
+    color: #1a1a1a;
+    width: 210mm;
+    min-height: 297mm;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.5;
+  }}
+
+  /* HEADER */
+  .header {{
+    background: {primary};
+    color: white;
+    padding: 40px 50px 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }}
+  .header-left .company {{
+    font-size: 13px;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }}
+  .header-left .client {{
+    font-size: 28px;
+    font-weight: 900;
+    margin-top: 8px;
+  }}
+  .header-right {{
+    text-align: right;
+    font-size: 12px;
+    opacity: 0.7;
+  }}
+
+  /* HOOK */
+  .hook-section {{
+    background: #f8f9fa;
+    padding: 35px 50px;
+    border-left: 5px solid {primary};
+  }}
+  .hook-text {{
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.4;
+    color: #1a1a1a;
+  }}
+
+  /* CONTENT */
+  .content {{
+    padding: 25px 50px 30px;
+  }}
+
+  /* SECTION TITLE */
+  .section-title {{
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #888;
+    margin-bottom: 15px;
+    margin-top: 25px;
+  }}
+  .section-title:first-child {{
+    margin-top: 0;
+  }}
+
+  .insight {{
+    font-size: 14px;
+    color: #333;
+    line-height: 1.6;
+    margin-bottom: 5px;
+  }}
+
+  /* PAIN POINTS */
+  .pain-item {{
+    display: flex;
+    gap: 15px;
+    margin-bottom: 12px;
+    align-items: flex-start;
+  }}
+  .pain-icon {{
+    color: {primary};
+    font-size: 10px;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }}
+  .pain-title {{
+    font-weight: 600;
+    font-size: 14px;
+  }}
+  .pain-desc {{
+    font-size: 13px;
+    color: #555;
+    margin-top: 3px;
+    line-height: 1.5;
+  }}
+
+  /* BENEFITS */
+  .benefits-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 10px;
+  }}
+  .benefit-card {{
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    border-left: 3px solid {primary};
+  }}
+  .benefit-title {{
+    font-weight: 600;
+    font-size: 13px;
+  }}
+  .benefit-proof {{
+    font-size: 12px;
+    color: #666;
+    margin-top: 4px;
+    font-style: italic;
+  }}
+
+  /* TARIFFS TABLE */
+  .pricing-table {{
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 13px;
+  }}
+  .pricing-table tr:nth-child(even) {{
+    background: #f8f9fa;
+  }}
+  .pricing-table td {{
+    padding: 8px 12px;
+    border-bottom: 1px solid #eee;
+  }}
+  .pricing-table td:last-child {{
+    text-align: right;
+    font-weight: 600;
+    color: {primary};
+  }}
+  .pricing-table tr.total-row {{
+    background: #e8f0fe;
+    font-weight: 700;
+  }}
+
+  /* CTA */
+  .cta-section {{
+    background: {primary};
+    color: white;
+    padding: 25px 50px;
+    margin-top: 20px;
+    text-align: center;
+  }}
+  .cta-text {{
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.5;
+  }}
+
+  /* FOOTER */
+  .footer {{
+    padding: 20px 50px;
+    text-align: center;
+    font-size: 12px;
+    color: #888;
+    border-top: 1px solid #eee;
+  }}
+  .footer .contacts {{
+    font-size: 13px;
+    color: #444;
+    margin-bottom: 8px;
+  }}
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-left">
+      <div class="company">MTP Fulfillment</div>
+      <div class="client">{client_name}</div>
+    </div>
+    <div class="header-right">
+      Комерційна пропозиція<br>
+      {date_str}
+    </div>
+  </div>
+
+  <div class="hook-section">
+    <div class="hook-text">{hook}</div>
+  </div>
+
+  <div class="content">
+    {"<div class='section-title'>Ми розуміємо вашу специфіку</div><p class='insight'>" + client_insight + "</p>" if client_insight else ""}
+
+    {"<div class='section-title'>Де зазвичай втрачається ефективність</div>" + pains_html if pains_html else ""}
+
+    {"<div class='section-title'>Чому МТП</div>" + mtp_fit_html if mtp_fit else ""}
+
+    {"<div class='section-title'>Ключові переваги</div><div class='benefits-grid'>" + benefits_html + "</div>" if benefits_html else ""}
+
+    <div class="section-title">Тарифи MTP Fulfillment</div>
+    <table class="pricing-table">
+      {tariffs_html}
+    </table>
+
+    {pricing_html}
+  </div>
+
+  <div class="cta-section">
+    <div class="cta-text">{zoom_cta}</div>
+  </div>
+
+  <div class="footer">
+    <div class="contacts">
+      mtpgrouppromo@gmail.com &nbsp;|&nbsp; +38 (050) 144-46-45 &nbsp;|&nbsp; fulfillmentmtp.com.ua &nbsp;|&nbsp; @nikolay_mtp
+    </div>
+    MTP Fulfillment — 7+ років на ринку, 60 000+ відправок на місяць
+  </div>
+
+</body>
+</html>"""
+        return html
+
+    def _generate_pdf(self, lead: Lead, analysis: Dict[str, Any], path: str, tariffs=None):
+        """Generate PDF from HTML using WeasyPrint."""
+        html = self._generate_html_proposal(lead, analysis, tariffs)
+
+        try:
+            from weasyprint import HTML
+            HTML(string=html).write_pdf(path)
+        except Exception as e:
+            logger.error(f"WeasyPrint failed: {e}, falling back to HTML file")
+            # Save as HTML fallback
+            html_path = path.replace(".pdf", ".html")
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(html)
 
     def _generate_email(self, lead: Lead, analysis: Dict[str, Any], path: str):
         subject = analysis.get("email_subject", f"{lead.name}, пропозиція від MTP Fulfillment")
         opening = analysis.get("email_opening", f"Привіт! Ми подивились на {lead.name} і бачимо великий потенціал.")
-        hook = analysis.get("hook", "")
         client_insight = analysis.get("client_insight", "")
         mtp_fit = analysis.get("mtp_fit", "")
         zoom_cta = analysis.get("zoom_cta", "Запишіться на безкоштовну Zoom-консультацію!")
