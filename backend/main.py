@@ -28,23 +28,9 @@ app.include_router(settings_router.router)
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    weasyprint_ok = False
-    weasyprint_err = ""
-    try:
-        from weasyprint import HTML
-        import tempfile, os
-        tmp = os.path.join(tempfile.gettempdir(), "test.pdf")
-        HTML(string="<h1>test</h1>").write_pdf(tmp)
-        weasyprint_ok = os.path.exists(tmp) and os.path.getsize(tmp) > 0
-        if os.path.exists(tmp):
-            os.remove(tmp)
-    except Exception as e:
-        weasyprint_err = str(e)[:200]
     return {
         "status": "ok",
         "storage_ready": bool(settings.SUPABASE_SERVICE_KEY),
-        "weasyprint_ok": weasyprint_ok,
-        "weasyprint_err": weasyprint_err or None,
     }
 
 

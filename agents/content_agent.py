@@ -383,16 +383,22 @@ class ContentAgent:
         return html
 
     def _generate_pdf(self, lead: Lead, analysis: Dict[str, Any], path: str, tariffs=None):
-        """Generate PDF from HTML using WeasyPrint, fallback to ReportLab."""
-        html = self._generate_html_proposal(lead, analysis, tariffs)
-
+        """Generate PDF: try WeasyPrint first, fallback to ReportLab."""
+        # Try WeasyPrint (needs system libs: libpango, libcairo, etc.)
         try:
             from weasyprint import HTML
+            html = self._generate_html_proposal(lead, analysis, tariffs)
             HTML(string=html).write_pdf(path)
             logger.info(f"PDF generated via WeasyPrint: {path}")
+            return
         except Exception as e:
-            logger.warning(f"WeasyPrint failed: {e}, falling back to ReportLab")
+            logger.warning(f"WeasyPrint unavailable: {e}")
+
+        # Fallback to ReportLab (always available)
+        try:
             self._generate_pdf_reportlab(lead, analysis, path, tariffs)
+        except Exception as e:
+            logger.error(f"ReportLab also failed: {e}")
 
     def _generate_pdf_reportlab(self, lead: Lead, analysis: Dict[str, Any], path: str, tariffs=None):
         """Fallback PDF generation using ReportLab."""
