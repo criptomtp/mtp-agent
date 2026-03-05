@@ -10,6 +10,19 @@ class StatusUpdate(BaseModel):
     outreach_status: str
 
 
+class LeadCreate(BaseModel):
+    name: str
+    city: str = ""
+    website: str = ""
+    email: str = ""
+    phone: str = ""
+    source: str = ""
+    status: str = "new"
+    analysis_json: dict = {}
+    score: int = 0
+    score_grade: str = "D"
+
+
 @router.get("/")
 def list_leads(
     status: str | None = Query(None),
@@ -25,6 +38,13 @@ def list_leads(
         query = query.eq("run_id", run_id)
     result = query.range(offset, offset + limit - 1).execute()
     return result.data
+
+
+@router.post("/")
+def create_lead(body: LeadCreate):
+    db = get_supabase()
+    result = db.table("leads").insert(body.model_dump()).execute()
+    return result.data[0] if result.data else {"error": "failed to create"}
 
 
 @router.get("/{lead_id}")

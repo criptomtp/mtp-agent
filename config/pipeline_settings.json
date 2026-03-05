@@ -1,0 +1,20 @@
+{
+  "agents": {
+    "research": {"enabled": true},
+    "analysis": {"enabled": true, "model": "gemini-2.5-flash"},
+    "content": {"enabled": true, "model": "gemini-2.0-flash-lite"},
+    "outreach": {"enabled": false}
+  },
+  "prompts": {
+    "analysis_system": "",
+    "analysis_user_template": ""
+  },
+  "available_models": [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-pro"
+  ]
+}

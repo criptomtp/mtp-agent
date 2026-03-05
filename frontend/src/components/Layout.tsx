@@ -1,10 +1,10 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const links = [
-  { to: "/", label: "Dashboard" },
-  { to: "/leads", label: "Leads" },
-  { to: "/runs", label: "Runs" },
-  { to: "/settings", label: "Settings" },
+  { to: "/", label: "Dashboard", icon: "\u{1F4CA}" },
+  { to: "/leads", label: "Leads", icon: "\u{1F465}" },
+  { to: "/runs", label: "Runs", icon: "\u{1F680}" },
+  { to: "/settings", label: "Settings", icon: "\u2699\uFE0F" },
 ];
 
 export default function Layout() {
@@ -29,6 +29,7 @@ export default function Layout() {
                 }`
               }
             >
+              <span className="mr-2">{l.icon}</span>
               {l.label}
             </NavLink>
           ))}

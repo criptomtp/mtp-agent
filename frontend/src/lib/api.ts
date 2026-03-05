@@ -55,4 +55,28 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ outreach_status }),
     }),
+
+  // Pipeline settings
+  getPipelineSettings: () => request<any>("/api/settings"),
+
+  savePipelineSettings: (data: { agents?: any; prompts?: any }) =>
+    request<any>("/api/settings", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  resetPrompts: () =>
+    request<any>("/api/settings/reset-prompts", { method: "POST" }),
+
+  testLead: (lead: {
+    name: string;
+    city?: string;
+    website?: string;
+    description?: string;
+    products_count?: number;
+  }) =>
+    request<{ analysis: any; email_text: string; pdf_url: string | null }>(
+      "/api/settings/test-lead",
+      { method: "POST", body: JSON.stringify(lead) }
+    ),
 };

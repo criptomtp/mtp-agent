@@ -171,6 +171,17 @@ class AnalysisAgent:
         """Get API key: first from passed dict, then from env."""
         return self._api_keys.get(name) or os.getenv(name.upper())
 
+    def _load_pipeline_settings(self) -> Dict[str, Any]:
+        """Load pipeline settings if available."""
+        try:
+            settings_path = os.path.join(
+                os.path.dirname(__file__), "..", "config", "pipeline_settings.json"
+            )
+            with open(settings_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
     def analyze(self, lead: Lead, tariffs: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Аналіз ліда: scrape website → Gemini → Claude → fallback."""
         website_data = _scrape_website(lead.website)
@@ -179,9 +190,14 @@ class AnalysisAgent:
 
         tariffs_text = _format_tariffs_for_prompt(tariffs)
 
-        result = self._try_gemini(lead, tariffs_text, website_data)
+        # Load custom model/prompts from pipeline settings
+        settings = self._load_pipeline_settings()
+        model_name = settings.get("agents", {}).get("analysis", {}).get("model", "gemini-2.5-flash")
+        custom_prompts = settings.get("prompts", {})
+
+        result = self._try_gemini(lead, tariffs_text, website_data, model_name=model_name, custom_prompts=custom_prompts)
         if not result:
-            result = self._try_claude(lead, tariffs_text, website_data)
+            result = self._try_claude(lead, tariffs_text, website_data, custom_prompts=custom_prompts)
         if not result:
             result = self._fallback_analysis(lead)
 
@@ -192,7 +208,37 @@ class AnalysisAgent:
         result["score_reasons"] = scoring["reasons"]
         return result
 
-    def _try_gemini(self, lead: Lead, tariffs_text: str, website_data: Dict[str, str]) -> Dict[str, Any] | None:
+    def _get_prompts(self, lead: Lead, tariffs_text: str, website_data: Dict[str, str],
+                      custom_prompts: Optional[Dict[str, str]] = None) -> tuple:
+        """Get prompts: custom from settings or default from _build_prompt."""
+        system_prompt, user_prompt = _build_prompt(lead, tariffs_text, website_data)
+        if custom_prompts:
+            if custom_prompts.get("analysis_system"):
+                system_prompt = custom_prompts["analysis_system"]
+            if custom_prompts.get("analysis_user_template"):
+                # Replace template variables
+                tpl = custom_prompts["analysis_user_template"]
+                tpl = tpl.replace("{company_name}", lead.name or "")
+                tpl = tpl.replace("{city}", lead.city or "")
+                tpl = tpl.replace("{website}", lead.website or "")
+                tpl = tpl.replace("{description}", lead.description or "")
+                tpl = tpl.replace("{products_count}", str(lead.products_count or 0))
+                tpl = tpl.replace("{source}", lead.source or "")
+                tpl = tpl.replace("{tariffs}", tariffs_text)
+                # Website data
+                ws = "Немає даних"
+                if website_data:
+                    title = website_data.get("title", "н/д")
+                    meta = website_data.get("meta_description", "н/д")
+                    text = website_data.get("text_excerpt", "н/д")[:800]
+                    ws = f"Заголовок: {title}\nМета-опис: {meta}\nТекст сайту: {text}"
+                tpl = tpl.replace("{website_data}", ws)
+                user_prompt = tpl
+        return system_prompt, user_prompt
+
+    def _try_gemini(self, lead: Lead, tariffs_text: str, website_data: Dict[str, str],
+                    model_name: str = "gemini-2.5-flash",
+                    custom_prompts: Optional[Dict[str, str]] = None) -> Dict[str, Any] | None:
         api_key = self._get_key("GEMINI_API_KEY")
         if not api_key:
             print("  [AnalysisAgent] GEMINI_API_KEY не налаштований.")
@@ -201,8 +247,9 @@ class AnalysisAgent:
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            system_prompt, user_prompt = _build_prompt(lead, tariffs_text, website_data)
-            model = genai.GenerativeModel("gemini-2.5-flash", system_instruction=system_prompt)
+            system_prompt, user_prompt = self._get_prompts(lead, tariffs_text, website_data, custom_prompts)
+            logger.info(f"  [AnalysisAgent] Using model: {model_name}")
+            model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
             response = model.generate_content(user_prompt)
             text = response.text.strip()
             if text.startswith("```"):
@@ -212,7 +259,8 @@ class AnalysisAgent:
             print(f"  [AnalysisAgent] Gemini помилка: {e}")
             return None
 
-    def _try_claude(self, lead: Lead, tariffs_text: str, website_data: Dict[str, str]) -> Dict[str, Any] | None:
+    def _try_claude(self, lead: Lead, tariffs_text: str, website_data: Dict[str, str],
+                    custom_prompts: Optional[Dict[str, str]] = None) -> Dict[str, Any] | None:
         api_key = self._get_key("ANTHROPIC_API_KEY")
         if not api_key:
             print("  [AnalysisAgent] ANTHROPIC_API_KEY не налаштований.")
@@ -221,7 +269,7 @@ class AnalysisAgent:
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
-            system_prompt, user_prompt = _build_prompt(lead, tariffs_text, website_data)
+            system_prompt, user_prompt = self._get_prompts(lead, tariffs_text, website_data, custom_prompts)
             message = client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=1500,
