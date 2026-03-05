@@ -257,9 +257,32 @@ export default function Leads() {
                   <div className="mb-3">
                     <p className="text-xs text-gray-400 mb-1">Болі клієнта:</p>
                     <ul className="space-y-1">
-                      {painPoints.map((p: string, i: number) => (
+                      {painPoints.map((p: any, i: number) => (
                         <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                          <span className="text-orange-400 mt-0.5">•</span> {p}
+                          <span className="text-orange-400 mt-0.5">•</span>
+                          <span>
+                            {typeof p === "object" ? (
+                              <><strong>{p.title}</strong>{p.description && <> — {p.description}</>}</>
+                            ) : p}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {analysis.key_benefits?.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs text-gray-400 mb-1">Ключові переваги:</p>
+                    <ul className="space-y-1">
+                      {analysis.key_benefits.map((b: any, i: number) => (
+                        <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                          <span className="text-green-500 mt-0.5">✓</span>
+                          <span>
+                            {typeof b === "object" ? (
+                              <>{b.benefit}{b.proof && <em className="text-gray-500"> ({b.proof})</em>}</>
+                            ) : b}
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -270,8 +293,10 @@ export default function Leads() {
                   <div>
                     <p className="text-xs text-gray-400 mb-1">Scoring:</p>
                     <ul className="space-y-0.5">
-                      {reasons.map((r: string, i: number) => (
-                        <li key={i} className="text-xs text-gray-500">— {r}</li>
+                      {reasons.map((r: any, i: number) => (
+                        <li key={i} className="text-xs text-gray-500">
+                          — {typeof r === "object" ? JSON.stringify(r) : r}
+                        </li>
                       ))}
                     </ul>
                   </div>
