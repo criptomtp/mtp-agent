@@ -1,1 +1,5 @@
-{"name":"mtp-lead-agent"}
+{
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
