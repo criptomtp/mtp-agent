@@ -87,9 +87,9 @@ async def run_pipeline(niche: str, count: int) -> dict:
             lead_dir = os.path.join(results_dir, f"{i+1:02d}_{safe_name}")
             os.makedirs(lead_dir, exist_ok=True)
 
-            # 3. Content — .generate(lead, analysis, dir, tariffs) returns {'pdf': path, 'email': path}
+            # 3. Content — .generate(lead, analysis, dir, tariffs) returns {'html': path, 'email': path}
             files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs)
-            pdf_path = files.get("pdf", "")
+            html_path = files.get("html", "")
             email_path = files.get("email", "")
 
             # 4. Outreach — .process(lead, dir, send_email) returns status string
@@ -119,30 +119,29 @@ async def run_pipeline(niche: str, count: int) -> dict:
             )
             lead_id = lead_record.data[0]["id"]
 
-            # Save file records — upload PDF to Supabase Storage, fall back to local URL
+            # Save file records — upload HTML to Supabase Storage, fall back to local URL
             project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
-            for file_type, file_path in [("pdf", pdf_path), ("email", email_path)]:
+            for file_type, file_path in [("html", html_path), ("email", email_path)]:
                 if not file_path or not os.path.exists(file_path):
                     continue
 
                 file_url = None
                 content_text = None
 
-                if file_type == "pdf":
-                    # Try Supabase Storage first (persists across deploys)
-                    storage_path = f"{run_id}/{lead_id}/proposal.pdf"
+                if file_type == "html":
+                    # Upload HTML presentation to Supabase Storage
+                    storage_path = f"{run_id}/{lead_id}/proposal.html"
                     with open(file_path, "rb") as f:
                         file_bytes = f.read()
-                    await _log(run_id, f"[{i+1}/{len(leads)}] Uploading PDF ({len(file_bytes)} bytes)...")
-                    storage_url = upload_to_storage("proposals", storage_path, file_bytes)
+                    await _log(run_id, f"[{i+1}/{len(leads)}] Uploading HTML ({len(file_bytes)} bytes)...")
+                    storage_url = upload_to_storage("proposals", storage_path, file_bytes, content_type="text/html")
                     if storage_url:
                         file_url = storage_url
-                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF uploaded to storage")
+                        await _log(run_id, f"[{i+1}/{len(leads)}] HTML uploaded to storage")
                     else:
-                        # Fall back to local file-serving endpoint
                         rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
                         file_url = f"/api/runs/files/{rel_path}"
-                        await _log(run_id, f"[{i+1}/{len(leads)}] PDF saved locally: {file_url}")
+                        await _log(run_id, f"[{i+1}/{len(leads)}] HTML saved locally: {file_url}")
 
                 elif file_type == "email":
                     with open(file_path, "r", encoding="utf-8") as f:

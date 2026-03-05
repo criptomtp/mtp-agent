@@ -2,7 +2,5 @@ requests
 beautifulsoup4
 lxml
 python-dotenv
-reportlab
-weasyprint
 google-generativeai
 anthropic

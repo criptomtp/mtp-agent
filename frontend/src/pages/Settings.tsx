@@ -492,14 +492,14 @@ function TestLeadTab() {
 
           {/* Actions */}
           <div className="flex space-x-3">
-            {result.pdf_url && (
+            {result.html_url && (
               <a
-                href={result.pdf_url}
+                href={result.html_url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-5 py-2 bg-mtp-blue text-white rounded-md hover:bg-blue-800"
               >
-                Відкрити PDF
+                Відкрити презентацію
               </a>
             )}
             <button

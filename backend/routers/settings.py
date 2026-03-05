@@ -132,28 +132,21 @@ def test_lead(body: TestLeadIn):
     content_agent = ContentAgent()
     files = content_agent.generate(lead, analysis, output_dir, tariffs=tariffs)
 
-    # Upload PDF if generated
-    pdf_url = None
-    pdf_path = files.get("pdf", "")
-    logger.info(f"[test-lead] PDF path: {pdf_path}, exists: {os.path.exists(pdf_path) if pdf_path else False}")
+    # Upload HTML presentation if generated
+    html_url = None
+    html_path = files.get("html", "")
+    logger.info(f"[test-lead] HTML path: {html_path}, exists: {os.path.exists(html_path) if html_path else False}")
 
-    # Check for HTML fallback too
-    if pdf_path and not os.path.exists(pdf_path):
-        html_path = pdf_path.replace(".pdf", ".html")
-        if os.path.exists(html_path):
-            logger.warning(f"[test-lead] PDF not found but HTML exists: {html_path}")
-            pdf_path = ""
-
-    if pdf_path and os.path.exists(pdf_path):
+    if html_path and os.path.exists(html_path):
         safe_name = re.sub(r"[^\w\s-]", "", body.name).strip().replace(" ", "_")[:50]
-        storage_path = f"test/{safe_name}/proposal.pdf"
-        with open(pdf_path, "rb") as f:
+        storage_path = f"test/{safe_name}/proposal.html"
+        with open(html_path, "rb") as f:
             file_bytes = f.read()
-        logger.info(f"[test-lead] Uploading PDF ({len(file_bytes)} bytes) to {storage_path}")
-        pdf_url = upload_to_storage("proposals", storage_path, file_bytes)
-        logger.info(f"[test-lead] Upload result: {pdf_url}")
-        if not pdf_url:
-            pdf_url = None
+        logger.info(f"[test-lead] Uploading HTML ({len(file_bytes)} bytes) to {storage_path}")
+        html_url = upload_to_storage("proposals", storage_path, file_bytes, content_type="text/html")
+        logger.info(f"[test-lead] Upload result: {html_url}")
+        if not html_url:
+            html_url = None
 
     # Read email text
     email_text = ""
@@ -165,5 +158,5 @@ def test_lead(body: TestLeadIn):
     return {
         "analysis": analysis,
         "email_text": email_text,
-        "pdf_url": pdf_url,
+        "html_url": html_url,
     }

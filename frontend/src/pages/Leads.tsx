@@ -98,13 +98,13 @@ export default function Leads() {
 
   const close = useCallback(() => { setSelected(null); setFiles([]); }, []);
 
-  const pdfFile = files.find((f: any) => f.file_type === "pdf");
+  const htmlFile = files.find((f: any) => f.file_type === "html") || files.find((f: any) => f.file_type === "pdf");
   const emailFile = files.find((f: any) => f.file_type === "email");
   const contactFile = files.find((f: any) => f.file_type === "contact_card");
-  const rawPdfUrl = pdfFile?.file_url;
-  const pdfUrl = rawPdfUrl?.startsWith("/")
-    ? `${import.meta.env.VITE_API_URL || ""}${rawPdfUrl}`
-    : rawPdfUrl;
+  const rawHtmlUrl = htmlFile?.file_url;
+  const proposalUrl = rawHtmlUrl?.startsWith("/")
+    ? `${import.meta.env.VITE_API_URL || ""}${rawHtmlUrl}`
+    : rawHtmlUrl;
   const emailText = emailFile?.content_text || "";
   const contactText = contactFile?.content_text || "";
 
@@ -317,21 +317,17 @@ export default function Leads() {
 
               {/* ── Section 4: Documents ── */}
               <CollapsibleSection title="📄 Документи" defaultOpen={true}>
-                {/* PDF */}
-                {pdfUrl && (
+                {/* HTML Presentation */}
+                {proposalUrl && (
                   <div className="flex items-center gap-3 mb-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                    <span className="text-2xl">📄</span>
+                    <span className="text-2xl">🎯</span>
                     <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-800">Комерційна пропозиція (PDF)</p>
-                      <p className="text-xs text-gray-400">proposal.pdf</p>
+                      <p className="text-sm font-medium text-gray-800">Комерційна пропозиція</p>
+                      <p className="text-xs text-gray-400">proposal.html</p>
                     </div>
-                    <a href={pdfUrl} target="_blank" rel="noopener noreferrer"
+                    <a href={proposalUrl} target="_blank" rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-mtp-blue text-white text-sm rounded hover:bg-blue-800 transition">
                       Відкрити
-                    </a>
-                    <a href={pdfUrl} download
-                      className="px-3 py-1.5 border border-mtp-blue text-mtp-blue text-sm rounded hover:bg-blue-50 transition">
-                      Завантажити
                     </a>
                   </div>
                 )}
@@ -358,7 +354,7 @@ export default function Leads() {
                   </div>
                 )}
 
-                {!pdfUrl && !emailText && !contactText && (
+                {!proposalUrl && !emailText && !contactText && (
                   <p className="text-sm text-gray-400 italic">Документи ще не згенеровані</p>
                 )}
               </CollapsibleSection>
