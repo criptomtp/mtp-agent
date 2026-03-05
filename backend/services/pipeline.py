@@ -134,7 +134,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
                     with open(file_path, "rb") as f:
                         file_bytes = f.read()
                     await _log(run_id, f"[{i+1}/{len(leads)}] Uploading HTML ({len(file_bytes)} bytes)...")
-                    storage_url = upload_to_storage("proposals", storage_path, file_bytes, content_type="text/html")
+                    storage_url = upload_to_storage("proposals", storage_path, file_bytes, content_type="text/html; charset=utf-8")
                     if storage_url:
                         file_url = storage_url
                         await _log(run_id, f"[{i+1}/{len(leads)}] HTML uploaded to storage")

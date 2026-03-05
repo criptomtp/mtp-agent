@@ -143,7 +143,7 @@ def test_lead(body: TestLeadIn):
         with open(html_path, "rb") as f:
             file_bytes = f.read()
         logger.info(f"[test-lead] Uploading HTML ({len(file_bytes)} bytes) to {storage_path}")
-        html_url = upload_to_storage("proposals", storage_path, file_bytes, content_type="text/html")
+        html_url = upload_to_storage("proposals", storage_path, file_bytes, content_type="text/html; charset=utf-8")
         logger.info(f"[test-lead] Upload result: {html_url}")
         if not html_url:
             html_url = None
