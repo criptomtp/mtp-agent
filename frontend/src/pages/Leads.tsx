@@ -99,10 +99,14 @@ export default function Leads() {
   const close = useCallback(() => { setSelected(null); setFiles([]); }, []);
 
   const htmlFile = files.find((f: any) => f.file_type === "html") || files.find((f: any) => f.file_type === "pdf");
+  const pptxFile = files.find((f: any) => f.file_type === "pptx");
   const emailFile = files.find((f: any) => f.file_type === "email");
   const contactFile = files.find((f: any) => f.file_type === "contact_card");
   const proposalUrl = selected && htmlFile
     ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal`
+    : null;
+  const pptxUrl = selected && pptxFile
+    ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal.pptx`
     : null;
   const emailText = emailFile?.content_text || "";
   const contactText = contactFile?.content_text || "";
@@ -331,6 +335,21 @@ export default function Leads() {
                   </div>
                 )}
 
+                {/* PPTX Download */}
+                {pptxUrl && (
+                  <div className="flex items-center gap-3 mb-3 p-3 bg-green-50 rounded-lg border border-green-200">
+                    <span className="text-2xl">📊</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-800">Презентація PPTX</p>
+                      <p className="text-xs text-gray-400">proposal.pptx</p>
+                    </div>
+                    <a href={pptxUrl} download
+                      className="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition">
+                      Завантажити
+                    </a>
+                  </div>
+                )}
+
                 {/* Email text */}
                 {emailText && (
                   <div className="mb-3">
@@ -353,7 +372,7 @@ export default function Leads() {
                   </div>
                 )}
 
-                {!proposalUrl && !emailText && !contactText && (
+                {!proposalUrl && !pptxUrl && !emailText && !contactText && (
                   <p className="text-sm text-gray-400 italic">Документи ще не згенеровані</p>
                 )}
               </CollapsibleSection>

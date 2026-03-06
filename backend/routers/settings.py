@@ -148,6 +148,17 @@ def test_lead(body: TestLeadIn):
         if not html_url:
             html_url = None
 
+    # Upload PPTX if generated
+    pptx_url = None
+    pptx_path = files.get("pptx", "")
+    if pptx_path and os.path.exists(pptx_path):
+        storage_path = f"test/{safe_name}/proposal.pptx"
+        with open(pptx_path, "rb") as f:
+            file_bytes = f.read()
+        logger.info(f"[test-lead] Uploading PPTX ({len(file_bytes)} bytes) to {storage_path}")
+        pptx_url = upload_to_storage("proposals", storage_path, file_bytes,
+                                     content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+
     # Read email text
     email_text = ""
     email_path = files.get("email", "")
@@ -159,4 +170,5 @@ def test_lead(body: TestLeadIn):
         "analysis": analysis,
         "email_text": email_text,
         "html_url": html_url,
+        "pptx_url": pptx_url,
     }

@@ -87,10 +87,11 @@ async def run_pipeline(niche: str, count: int) -> dict:
             lead_dir = os.path.join(results_dir, f"{i+1:02d}_{safe_name}")
             os.makedirs(lead_dir, exist_ok=True)
 
-            # 3. Content — .generate(lead, analysis, dir, tariffs) returns {'html': path, 'email': path}
+            # 3. Content — .generate(lead, analysis, dir, tariffs) returns {'html': path, 'email': path, 'pptx': path}
             files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs)
             html_path = files.get("html", "")
             email_path = files.get("email", "")
+            pptx_path = files.get("pptx", "")
 
             # 4. Outreach — .process(lead, dir, send_email) returns status string
             await _log(run_id, f"[{i+1}/{len(leads)}] Processing outreach: {lead_name}")
@@ -121,7 +122,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
             # Save file records — upload HTML to Supabase Storage, fall back to local URL
             project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
-            for file_type, file_path in [("html", html_path), ("email", email_path)]:
+            for file_type, file_path in [("html", html_path), ("email", email_path), ("pptx", pptx_path)]:
                 if not file_path or not os.path.exists(file_path):
                     continue
 
@@ -142,6 +143,17 @@ async def run_pipeline(niche: str, count: int) -> dict:
                         rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
                         file_url = f"/api/runs/files/{rel_path}"
                         await _log(run_id, f"[{i+1}/{len(leads)}] HTML saved locally: {file_url}")
+
+                elif file_type == "pptx":
+                    storage_path = f"{run_id}/{lead_id}/proposal.pptx"
+                    with open(file_path, "rb") as f:
+                        file_bytes = f.read()
+                    await _log(run_id, f"[{i+1}/{len(leads)}] Uploading PPTX ({len(file_bytes)} bytes)...")
+                    storage_url = upload_to_storage("proposals", storage_path, file_bytes,
+                                                    content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+                    if storage_url:
+                        file_url = storage_url
+                        await _log(run_id, f"[{i+1}/{len(leads)}] PPTX uploaded to storage")
 
                 elif file_type == "email":
                     with open(file_path, "r", encoding="utf-8") as f:

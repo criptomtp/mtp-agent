@@ -2,7 +2,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from backend.services.database import get_supabase
@@ -113,6 +113,36 @@ async def get_lead_proposal(lead_id: str):
     except Exception as e:
         logger.error(f"Proposal fetch error: {e}")
         return HTMLResponse(f"<h1>Помилка: {e}</h1>", status_code=500)
+
+
+@router.get("/{lead_id}/proposal.pptx")
+async def get_lead_pptx(lead_id: str):
+    try:
+        sb = get_supabase()
+        lead = sb.table("leads").select("*").eq("id", lead_id).single().execute()
+        if not lead.data:
+            return Response("Not found", status_code=404)
+
+        lead_data = lead.data
+        safe_name = re.sub(r"[^\w\s-]", "", lead_data.get("name", "")).strip().replace(" ", "_")[:50]
+        run_id = lead_data.get("run_id", "test")
+
+        for path in [f"{run_id}/{lead_id}/proposal.pptx", f"test/{safe_name}/proposal.pptx"]:
+            try:
+                response = sb.storage.from_("proposals").download(path)
+                if response:
+                    return Response(
+                        content=response,
+                        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        headers={"Content-Disposition": f'attachment; filename="proposal_{safe_name}.pptx"'},
+                    )
+            except Exception:
+                continue
+
+        return Response("PPTX not found", status_code=404)
+    except Exception as e:
+        logger.error(f"PPTX fetch error: {e}")
+        return Response(f"Error: {e}", status_code=500)
 
 
 @router.get("/{lead_id}/files")

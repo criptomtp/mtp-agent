@@ -75,7 +75,7 @@ export const api = {
     description?: string;
     products_count?: number;
   }) =>
-    request<{ analysis: any; email_text: string; html_url: string | null }>(
+    request<{ analysis: any; email_text: string; html_url: string | null; pptx_url: string | null }>(
       "/api/settings/test-lead",
       { method: "POST", body: JSON.stringify(lead) }
     ),

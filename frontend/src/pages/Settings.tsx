@@ -502,6 +502,15 @@ function TestLeadTab() {
                 Відкрити презентацію
               </a>
             )}
+            {result.pptx_url && (
+              <a
+                href={result.pptx_url}
+                download
+                className="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+              >
+                Завантажити PPTX
+              </a>
+            )}
             <button
               onClick={saveLead}
               disabled={savingLead}

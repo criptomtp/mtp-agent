@@ -1,10 +1,15 @@
-"""ContentAgent — генерація HTML презентації та email тексту."""
+"""ContentAgent — генерація HTML презентації, PPTX та email тексту."""
 
 import os
 import re
 import logging
 from typing import Dict, Any
 from datetime import datetime
+
+from pptx import Presentation
+from pptx.util import Inches, Pt, Emu
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from .research_agent import Lead
 
@@ -54,20 +59,287 @@ class ContentAgent:
         pass
 
     def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str, tariffs=None) -> Dict[str, str]:
-        """Генерує HTML презентацію та email.txt. Повертає шляхи до файлів."""
+        """Генерує HTML, PPTX та email.txt. Повертає шляхи до файлів."""
         os.makedirs(output_dir, exist_ok=True)
 
         html_path = os.path.join(output_dir, "proposal.html")
         email_path = os.path.join(output_dir, "email.txt")
+        safe_name = re.sub(r"[^\w\s-]", "", lead.name).strip().replace(" ", "_")[:50]
+        pptx_path = os.path.join(output_dir, f"{safe_name}_proposal.pptx")
 
         html = self._generate_html_proposal(lead, analysis, tariffs)
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html)
         logger.info(f"HTML presentation saved: {html_path}")
 
+        # PPTX generation
+        try:
+            prs = self._generate_pptx_proposal(lead, analysis, tariffs)
+            prs.save(pptx_path)
+            logger.info(f"PPTX presentation saved: {pptx_path}")
+        except Exception as e:
+            logger.error(f"PPTX generation failed: {e}", exc_info=True)
+            pptx_path = ""
+
         self._generate_email(lead, analysis, email_path)
 
-        return {"html": html_path, "email": email_path}
+        return {"html": html_path, "email": email_path, "pptx": pptx_path}
+
+    # ── PPTX helpers ──
+
+    @staticmethod
+    def _pptx_add_bg(slide, prs, color):
+        """Add a full-slide background rectangle."""
+        from pptx.util import Emu
+        from pptx.enum.shapes import MSO_SHAPE
+        bg = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height)
+        bg.fill.solid()
+        bg.fill.fore_color.rgb = color
+        bg.line.fill.background()
+
+    @staticmethod
+    def _pptx_text_box(slide, left, top, width, height, text, font_size=18, bold=False,
+                       color=RGBColor(0xFF, 0xFF, 0xFF), alignment=PP_ALIGN.LEFT, font_name="Calibri"):
+        """Add a text box with styled text."""
+        txBox = slide.shapes.add_textbox(left, top, width, height)
+        tf = txBox.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.text = str(text)
+        p.font.size = Pt(font_size)
+        p.font.bold = bold
+        p.font.color.rgb = color
+        p.font.name = font_name
+        p.alignment = alignment
+        return tf
+
+    def _generate_pptx_proposal(self, lead: Lead, analysis: Dict[str, Any], tariffs=None):
+        """Generate 6-slide dark-themed PPTX presentation."""
+        BG = RGBColor(0x0F, 0x20, 0x44)
+        BG_CARD = RGBColor(0x16, 0x2D, 0x5A)
+        ACCENT = RGBColor(0x00, 0xB4, 0xD8)
+        MINT = RGBColor(0x06, 0xD6, 0xA0)
+        WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+        LIGHT = RGBColor(0xBB, 0xBB, 0xCC)
+        ORANGE = RGBColor(0xFF, 0x6B, 0x35)
+
+        prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+        blank_layout = prs.slide_layouts[6]
+
+        W = prs.slide_width
+        H = prs.slide_height
+        MARGIN = Inches(0.8)
+        CONTENT_W = W - 2 * MARGIN
+
+        date_str = datetime.now().strftime("%d.%m.%Y")
+        hook = analysis.get("hook", f"{lead.name}: час масштабуватись")
+        client_insight = analysis.get("client_insight", "")
+        zoom_cta = analysis.get("zoom_cta", "Запишіться на безкоштовну Zoom-консультацію!")
+
+        # ── SLIDE 1: Hero ──
+        slide = prs.slides.add_slide(blank_layout)
+        self._pptx_add_bg(slide, prs, BG)
+        self._pptx_text_box(slide, MARGIN, Inches(1.0), CONTENT_W, Inches(0.6),
+                            "MTP FULFILLMENT", font_size=14, color=ACCENT, bold=True)
+        self._pptx_text_box(slide, MARGIN, Inches(2.0), CONTENT_W, Inches(1.5),
+                            lead.name, font_size=48, bold=True, color=WHITE)
+        subtitle = f"Комерційна пропозиція"
+        if lead.city:
+            subtitle += f"  •  {lead.city}"
+        self._pptx_text_box(slide, MARGIN, Inches(3.8), CONTENT_W, Inches(0.6),
+                            subtitle, font_size=20, color=LIGHT)
+        self._pptx_text_box(slide, MARGIN, Inches(6.2), CONTENT_W, Inches(0.5),
+                            date_str, font_size=14, color=LIGHT, alignment=PP_ALIGN.RIGHT)
+        # Accent line
+        from pptx.enum.shapes import MSO_SHAPE
+        line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, MARGIN, Inches(3.5), Inches(3), Pt(4))
+        line.fill.solid()
+        line.fill.fore_color.rgb = ACCENT
+        line.line.fill.background()
+
+        # ── SLIDE 2: Insight ──
+        slide = prs.slides.add_slide(blank_layout)
+        self._pptx_add_bg(slide, prs, BG)
+        self._pptx_text_box(slide, MARGIN, Inches(0.5), CONTENT_W, Inches(0.4),
+                            "ПРО НАС", font_size=12, color=ACCENT, bold=True)
+        # Stats row
+        stats = [("7+", "років на ринку"), ("60K+", "відправок / міс"), ("2", "склади під Києвом"), ("30с", "середній час обробки")]
+        stat_w = Inches(2.8)
+        for i, (num, label) in enumerate(stats):
+            x = MARGIN + Emu(int(i * stat_w))
+            self._pptx_text_box(slide, x, Inches(1.2), stat_w, Inches(0.8),
+                                num, font_size=44, bold=True, color=MINT)
+            self._pptx_text_box(slide, x, Inches(2.0), stat_w, Inches(0.5),
+                                label, font_size=13, color=LIGHT)
+        # Insight text
+        if client_insight:
+            self._pptx_text_box(slide, MARGIN, Inches(3.2), CONTENT_W, Inches(0.4),
+                                "МИ РОЗУМІЄМО ВАШУ СПЕЦИФІКУ", font_size=12, color=ACCENT, bold=True)
+            self._pptx_text_box(slide, MARGIN, Inches(3.8), CONTENT_W, Inches(2.5),
+                                client_insight, font_size=18, color=WHITE)
+
+        # ── SLIDE 3: Pain Points ──
+        slide = prs.slides.add_slide(blank_layout)
+        self._pptx_add_bg(slide, prs, BG)
+        self._pptx_text_box(slide, MARGIN, Inches(0.5), CONTENT_W, Inches(0.4),
+                            "ДЕ ВТРАЧАЄТЬСЯ ЕФЕКТИВНІСТЬ", font_size=12, color=ACCENT, bold=True)
+        pain_points = analysis.get("pain_points", [])
+        card_w = Inches(3.6)
+        card_h = Inches(3.8)
+        gap = Inches(0.4)
+        for i, p in enumerate(pain_points[:3]):
+            x = MARGIN + Emu(int(i * (card_w + gap)))
+            # Card background
+            card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, Inches(1.3), card_w, card_h)
+            card.fill.solid()
+            card.fill.fore_color.rgb = BG_CARD
+            card.line.fill.background()
+            # Number
+            self._pptx_text_box(slide, x + Inches(0.3), Inches(1.6), Inches(1), Inches(0.7),
+                                f"0{i+1}", font_size=36, bold=True, color=ACCENT)
+            # Title & description
+            if isinstance(p, dict):
+                title = p.get("title", "")
+                desc = p.get("description", "")
+            else:
+                title = str(p)
+                desc = ""
+            self._pptx_text_box(slide, x + Inches(0.3), Inches(2.5), card_w - Inches(0.6), Inches(0.6),
+                                title, font_size=16, bold=True, color=WHITE)
+            if desc:
+                self._pptx_text_box(slide, x + Inches(0.3), Inches(3.2), card_w - Inches(0.6), Inches(1.5),
+                                    desc, font_size=13, color=LIGHT)
+
+        # ── SLIDE 4: Benefits ──
+        slide = prs.slides.add_slide(blank_layout)
+        self._pptx_add_bg(slide, prs, BG)
+        self._pptx_text_box(slide, MARGIN, Inches(0.5), CONTENT_W, Inches(0.4),
+                            "КЛЮЧОВІ ПЕРЕВАГИ", font_size=12, color=ACCENT, bold=True)
+        benefits = analysis.get("key_benefits", [])
+        b_w = Inches(5.5)
+        b_h = Inches(2.2)
+        b_gap_x = Inches(0.5)
+        b_gap_y = Inches(0.4)
+        for i, kb in enumerate(benefits[:4]):
+            col = i % 2
+            row = i // 2
+            x = MARGIN + Emu(int(col * (b_w + b_gap_x)))
+            y = Inches(1.3) + Emu(int(row * (b_h + b_gap_y)))
+            # Card
+            card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, b_w, b_h)
+            card.fill.solid()
+            card.fill.fore_color.rgb = BG_CARD
+            card.line.fill.background()
+            # Accent stripe
+            stripe = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, Pt(5), b_h)
+            stripe.fill.solid()
+            stripe.fill.fore_color.rgb = MINT
+            stripe.line.fill.background()
+            if isinstance(kb, dict):
+                benefit = kb.get("benefit", "")
+                proof = kb.get("proof", "")
+            else:
+                benefit = str(kb)
+                proof = ""
+            self._pptx_text_box(slide, x + Inches(0.4), y + Inches(0.3), b_w - Inches(0.7), Inches(0.6),
+                                benefit, font_size=16, bold=True, color=WHITE)
+            if proof:
+                self._pptx_text_box(slide, x + Inches(0.4), y + Inches(1.0), b_w - Inches(0.7), Inches(1.0),
+                                    proof, font_size=13, color=LIGHT)
+
+        # ── SLIDE 5: Pricing ──
+        slide = prs.slides.add_slide(blank_layout)
+        self._pptx_add_bg(slide, prs, BG)
+        self._pptx_text_box(slide, MARGIN, Inches(0.5), CONTENT_W, Inches(0.4),
+                            "ТАРИФИ MTP FULFILLMENT", font_size=12, color=ACCENT, bold=True)
+        tariff_rows = _build_tariffs_rows(tariffs)
+        rows_count = len(tariff_rows) + 1
+        cols = 2
+        tbl_w = Inches(7)
+        tbl = slide.shapes.add_table(rows_count, cols, MARGIN, Inches(1.3), tbl_w, Inches(0.45 * rows_count)).table
+        tbl.columns[0].width = Inches(4.5)
+        tbl.columns[1].width = Inches(2.5)
+        # Header
+        for ci, txt in enumerate(["Послуга", "Тариф"]):
+            cell = tbl.cell(0, ci)
+            cell.text = txt
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = ACCENT
+            for p in cell.text_frame.paragraphs:
+                p.font.size = Pt(13)
+                p.font.bold = True
+                p.font.color.rgb = WHITE
+                p.font.name = "Calibri"
+        # Rows
+        for ri, (name, price) in enumerate(tariff_rows):
+            for ci, txt in enumerate([name, price]):
+                cell = tbl.cell(ri + 1, ci)
+                cell.text = txt
+                cell.fill.solid()
+                cell.fill.fore_color.rgb = BG_CARD if ri % 2 == 0 else BG
+                for p in cell.text_frame.paragraphs:
+                    p.font.size = Pt(12)
+                    p.font.color.rgb = WHITE if ci == 0 else MINT
+                    p.font.name = "Calibri"
+        # Pricing estimate
+        pricing = analysis.get("pricing_estimate", {})
+        if pricing:
+            self._pptx_text_box(slide, Inches(8.5), Inches(1.3), Inches(4), Inches(0.4),
+                                "ОРІЄНТОВНИЙ КОШТОРИС", font_size=12, color=ACCENT, bold=True)
+            y_off = Inches(2.0)
+            if isinstance(pricing, dict):
+                for key, val in pricing.items():
+                    label = key.replace("_", " ").capitalize()
+                    self._pptx_text_box(slide, Inches(8.5), y_off, Inches(2.5), Inches(0.4),
+                                        label, font_size=13, color=LIGHT)
+                    self._pptx_text_box(slide, Inches(11), y_off, Inches(1.5), Inches(0.4),
+                                        str(val), font_size=13, bold=True, color=MINT, alignment=PP_ALIGN.RIGHT)
+                    y_off += Inches(0.45)
+            else:
+                self._pptx_text_box(slide, Inches(8.5), y_off, Inches(4), Inches(1),
+                                    str(pricing), font_size=16, color=WHITE)
+
+        # ── SLIDE 6: CTA ──
+        slide = prs.slides.add_slide(blank_layout)
+        self._pptx_add_bg(slide, prs, BG)
+        self._pptx_text_box(slide, MARGIN, Inches(1.5), CONTENT_W, Inches(0.6),
+                            "НАСТУПНИЙ КРОК", font_size=14, color=ACCENT, bold=True)
+        self._pptx_text_box(slide, MARGIN, Inches(2.3), CONTENT_W, Inches(1.2),
+                            zoom_cta, font_size=28, bold=True, color=WHITE)
+        # CTA button shape
+        btn_w = Inches(4)
+        btn_h = Inches(0.8)
+        btn_x = Emu(int((W - btn_w) / 2))
+        btn = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, btn_x, Inches(4.0), btn_w, btn_h)
+        btn.fill.solid()
+        btn.fill.fore_color.rgb = ACCENT
+        btn.line.fill.background()
+        tf = btn.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.text = "ZOOM-ДЗВІНОК"
+        p.font.size = Pt(18)
+        p.font.bold = True
+        p.font.color.rgb = WHITE
+        p.font.name = "Calibri"
+        p.alignment = PP_ALIGN.CENTER
+        tf.paragraphs[0].space_before = Pt(10)
+        # Contacts
+        contacts = [
+            "mtpgrouppromo@gmail.com  |  +38 (050) 144-46-45",
+            "fulfillmentmtp.com.ua  |  @nikolay_mtp",
+        ]
+        self._pptx_text_box(slide, MARGIN, Inches(5.3), CONTENT_W, Inches(0.5),
+                            contacts[0], font_size=14, color=LIGHT, alignment=PP_ALIGN.CENTER)
+        self._pptx_text_box(slide, MARGIN, Inches(5.8), CONTENT_W, Inches(0.5),
+                            contacts[1], font_size=14, color=LIGHT, alignment=PP_ALIGN.CENTER)
+        self._pptx_text_box(slide, MARGIN, Inches(6.5), CONTENT_W, Inches(0.4),
+                            "MTP Fulfillment — 7+ років на ринку, 60 000+ відправок на місяць",
+                            font_size=11, color=RGBColor(0x66, 0x66, 0x88), alignment=PP_ALIGN.CENTER)
+
+        return prs
 
     def _generate_html_proposal(self, lead: Lead, analysis: Dict[str, Any], tariffs=None) -> str:
         """Generate HTML string for the commercial proposal."""
