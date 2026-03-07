@@ -3,7 +3,8 @@
 import os
 import re
 import logging
-from typing import Dict, Any
+import requests
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 from pptx import Presentation
@@ -83,7 +84,77 @@ class ContentAgent:
 
         self._generate_email(lead, analysis, email_path)
 
-        return {"html": html_path, "email": email_path, "pptx": pptx_path}
+        # Web proposal via mtp-cabinet API
+        web_url = None
+        try:
+            web_url = self.create_web_proposal(lead, analysis)
+        except Exception as e:
+            logger.error(f"Web proposal creation failed: {e}", exc_info=True)
+
+        result = {"html": html_path, "email": email_path, "pptx": pptx_path}
+        if web_url:
+            result["web_url"] = web_url
+        return result
+
+    def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any]) -> Optional[str]:
+        """Create a web proposal via mtp-cabinet API. Returns proposal URL or None."""
+        api_secret = os.getenv("MTP_CABINET_API_SECRET", "dev-secret")
+        url = "https://mtp-cabinet.vercel.app/api/proposals/create"
+
+        pain_points_text = ""
+        for p in analysis.get("pain_points", []):
+            if isinstance(p, dict):
+                pain_points_text += f"{p.get('title', '')}: {p.get('description', '')}; "
+            else:
+                pain_points_text += f"{p}; "
+
+        pricing_estimate = analysis.get("pricing_estimate", {})
+
+        payload = {
+            "client_name": lead.name,
+            "client_data": {
+                "hook": analysis.get("hook", ""),
+                "client_insight": analysis.get("client_insight", ""),
+                "description": getattr(lead, "description", "") or "",
+                "blockers": pain_points_text.strip("; "),
+                "goal": "Запустити e-commerce",
+                "market": getattr(lead, "category", "") or "",
+                "city": getattr(lead, "city", "") or "",
+                "products_count": getattr(lead, "products_count", None),
+                "website": getattr(lead, "website", "") or "",
+                "pain_points": analysis.get("pain_points", []),
+                "key_benefits": analysis.get("key_benefits", []),
+                "mtp_fit": analysis.get("mtp_fit", ""),
+                "score": analysis.get("score"),
+                "grade": analysis.get("grade", ""),
+            },
+            "pricing_data": {
+                "tariffs": [
+                    {"name": name, "price": price}
+                    for name, price in _build_tariffs_rows()
+                ],
+                "estimate": pricing_estimate if isinstance(pricing_estimate, dict) else {},
+            },
+        }
+
+        resp = requests.post(
+            url,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_secret}",
+                "Content-Type": "application/json",
+            },
+            timeout=15,
+        )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            web_url = data.get("url", "")
+            logger.info(f"Web proposal created: {web_url}")
+            return web_url
+        else:
+            logger.error(f"Web proposal API error {resp.status_code}: {resp.text}")
+            return None
 
     # ── PPTX helpers ──
 
