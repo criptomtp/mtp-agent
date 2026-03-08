@@ -84,7 +84,7 @@ class ContentAgent:
 
         self._generate_email(lead, analysis, email_path)
 
-        # Web proposal via mtp-cabinet API
+        # Web proposal via proposals API
         web_proposal = None
         try:
             web_proposal = self.create_web_proposal(lead, analysis)
@@ -98,7 +98,7 @@ class ContentAgent:
         return result
 
     def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Create a web proposal via mtp-cabinet API.
+        """Create a web proposal via proposals API.
 
         Returns {'slug': ..., 'url': ..., 'proposal_id': ...} or None on error.
         """

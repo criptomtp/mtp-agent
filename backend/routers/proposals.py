@@ -85,7 +85,7 @@ def create_proposal(body: CreateProposalIn, authorization: Optional[str] = Heade
         return JSONResponse({"error": "Failed to create proposal"}, status_code=500)
 
     row = result.data[0]
-    base_url = os.getenv("MTP_CABINET_URL", "https://mtp-cabinet.vercel.app")
+    base_url = os.getenv("MTP_FRONTEND_URL", "https://mtp-lead-agent.vercel.app")
     return {
         "slug": row["slug"],
         "url": f"{base_url}/proposals/{row['slug']}",
@@ -141,7 +141,7 @@ async def track_event(body: TrackEventIn, request: Request):
 
                 # Notify on first view
                 if (proposal.get("views_count") or 0) == 0 and proposal.get("client_name"):
-                    base_url = os.getenv("MTP_CABINET_URL", "https://mtp-cabinet.vercel.app")
+                    base_url = os.getenv("MTP_FRONTEND_URL", "https://mtp-lead-agent.vercel.app")
                     await notify_telegram(
                         "open",
                         proposal["client_name"],
