@@ -60,7 +60,7 @@ class ResearchAgent:
     INSTAGRAM_GRAPH_URL = "https://graph.facebook.com/v19.0"
 
     # All available search channels
-    ALL_CHANNELS = ["google_organic", "google_maps", "google_search", "prom", "olx", "instagram", "facebook"]
+    ALL_CHANNELS = ["google", "prom", "google_maps", "google_search", "olx", "instagram", "facebook"]
 
     def __init__(self, api_keys: Optional[dict] = None, channels: Optional[List[str]] = None):
         self._api_keys = api_keys or {}
@@ -212,7 +212,7 @@ class ResearchAgent:
         # Request 2x to account for dedup filtering
         remaining = lambda: max(0, count * 2 - len(leads))
         channel_methods = {
-            "google_organic": lambda: self._search_google_organic(remaining(), niche=niche),
+            "google": lambda: self._search_google(remaining(), niche=niche),
             "prom": lambda: self._search_prom(remaining(), niche=niche),
             "google_maps": lambda: self._search_google_maps(remaining(), niche=niche),
             "google_search": lambda: self._search_google_custom(remaining(), niche=niche),
@@ -361,62 +361,79 @@ class ResearchAgent:
         "makeup.com.ua", "pinterest.com", "linkedin.com", "twitter.com",
     }
 
-    def _search_google_organic(self, count: int, niche: str = "косметика") -> List[Lead]:
-        """Search Google organically via googlesearch-python."""
+    def _search_google(self, count: int, niche: str = "косметика") -> List[Lead]:
+        """Search Google via direct HTTP request — parse <h3> and <cite>/href for leads."""
+        from urllib.parse import urlparse, quote_plus
+
         leads = []
         queries = [
-            f"{niche} інтернет-магазин Україна",
+            f"{niche} інтернет магазин Україна сайт",
             f"{niche} оптом Україна купити",
-            f"{niche} виробник Україна сайт",
+            f"{niche} виробник Україна",
         ]
-
-        try:
-            from googlesearch import search as gsearch
-        except ImportError:
-            logger.warning("[ResearchAgent] googlesearch-python not installed, skipping google_organic")
-            return []
 
         for query in queries:
             if len(leads) >= count:
                 break
             try:
-                results = list(gsearch(query, num_results=10, lang="uk", sleep_interval=2))
-                for url in results:
+                url = f"https://www.google.com/search?q={quote_plus(query)}&num=10&hl=uk"
+                resp = requests.get(url, headers=self.HEADERS, timeout=10)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "lxml")
+
+                # Each search result lives in a <div class="g"> or similar container
+                # We look for <a> tags with real hrefs + <h3> for titles
+                for a_tag in soup.select("a[href]"):
                     if len(leads) >= count:
                         break
 
-                    from urllib.parse import urlparse
-                    parsed = urlparse(url)
+                    href = a_tag.get("href", "")
+                    # Google wraps links in /url?q=... or direct https://
+                    if href.startswith("/url?q="):
+                        href = href.split("/url?q=")[1].split("&")[0]
+                    if not href.startswith("http"):
+                        continue
+
+                    parsed = urlparse(href)
                     domain = parsed.netloc.replace("www.", "")
 
-                    # Skip aggregators
+                    # Skip aggregators and Google itself
                     if any(skip in domain for skip in self.SKIP_DOMAINS):
                         continue
 
-                    # Extract company name from domain
-                    name = domain.split(".")[0]
+                    # Skip already seen domains
+                    if any(domain in (getattr(l, "website", "") or "") for l in leads):
+                        continue
+
+                    # Get company name from <h3> inside the link, or from domain
+                    h3 = a_tag.select_one("h3")
+                    if h3:
+                        raw_name = h3.get_text(strip=True)
+                        # Clean title: take first part before separators
+                        name = clean_company_name(
+                            raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                        )
+                    else:
+                        name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+
                     if len(name) < 3:
                         continue
-                    name = clean_company_name(name.replace("-", " ").replace("_", " ").title())
 
                     lead = Lead(
                         name=name,
-                        website=url,
+                        website=href,
                         description=f"Google: {query}",
-                        source="google_organic",
+                        source="google",
                     )
 
                     # Enrich from website
                     self._scrape_contact_from_website(lead)
-                    if not lead.email and not lead.phone:
-                        lead.contact_source = "manual_needed"
-                    else:
-                        lead.contact_source = "website"
+                    lead.contact_source = "website" if (lead.email or lead.phone) else "manual_needed"
 
                     leads.append(lead)
 
             except Exception as e:
-                logger.warning(f"[ResearchAgent] Google organic ({query}): {e}")
+                logger.warning(f"[ResearchAgent] Google search ({query}): {e}")
                 continue
 
         return leads
