@@ -171,4 +171,6 @@ def test_lead(body: TestLeadIn):
         "email_text": email_text,
         "html_url": html_url,
         "pptx_url": pptx_url,
+        "web_url": files.get("web_url"),
+        "web_proposal": files.get("web_proposal"),
     }
