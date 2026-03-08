@@ -187,7 +187,7 @@ class ResearchAgent:
         ),
     ]
 
-    def search(self, count: int = 5, channels: Optional[List[str]] = None) -> List[Lead]:
+    def search(self, count: int = 5, niche: str = "косметика", channels: Optional[List[str]] = None) -> List[Lead]:
         """Шукає лідів з вибраних джерел, повертає до count результатів."""
         active_channels = channels or self._channels
         leads: List[Lead] = []
@@ -212,8 +212,8 @@ class ResearchAgent:
         remaining = lambda: max(0, count * 2 - len(leads))
         channel_methods = {
             "prom": lambda: self._search_prom(remaining()),
-            "google_maps": lambda: self._search_google_maps(remaining()),
-            "google_search": lambda: self._search_google_custom(remaining()),
+            "google_maps": lambda: self._search_google_maps(remaining(), niche=niche),
+            "google_search": lambda: self._search_google_custom(remaining(), niche=niche),
             "olx": lambda: self._search_olx(remaining()),
             "instagram": lambda: self._search_instagram(remaining()),
             "facebook": lambda: self._search_facebook(remaining()),
@@ -232,7 +232,16 @@ class ResearchAgent:
         # Deduplicate against existing leads in DB
         leads = self._filter_already_contacted(leads)
 
-        # Fallback only if we still need more after dedup
+        # Gemini fallback — generate leads via AI if scrapers returned 0
+        if len(leads) < count:
+            logger.info(f"[ResearchAgent] Scrapers returned {len(leads)}/{count}, using Gemini fallback for '{niche}'")
+            try:
+                gemini_leads = self._generate_leads_gemini(count - len(leads), niche)
+                _add_leads(gemini_leads)
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] Gemini fallback failed: {e}")
+
+        # Static fallback only if still short
         if len(leads) < count:
             fallback_pool = self._filter_already_contacted(list(self.FALLBACK_LEADS))
             random.shuffle(fallback_pool)
@@ -245,6 +254,64 @@ class ResearchAgent:
                     leads.append(lead)
 
         return leads[:count]
+
+    def _generate_leads_gemini(self, count: int, niche: str) -> List[Lead]:
+        """Generate realistic leads via Gemini AI based on niche."""
+        import json as _json
+        api_key = self._api_keys.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.info("[ResearchAgent] Gemini API key not configured, skipping.")
+            return []
+
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-2.0-flash")
+
+            prompt = f"""Ти — експерт з B2B лідогенерації в Україні.
+Згенеруй {count} реалістичних потенційних клієнтів (українські компанії) у ніші "{niche}",
+яким може бути корисний фулфілмент-сервіс (зберігання, пакування, доставка товарів).
+
+Для кожного ліда вкажи:
+- name: назва компанії (реалістична українська назва)
+- website: правдоподібний URL (формат https://example.com.ua)
+- email: правдоподібний email
+- phone: телефон у форматі +380XXXXXXXXX
+- city: місто в Україні
+- description: короткий опис бізнесу (1-2 речення)
+- products_count: приблизна кількість товарних позицій (число)
+
+Відповідь ТІЛЬКИ у форматі JSON масив, без markdown:
+[{{"name":"...","website":"...","email":"...","phone":"...","city":"...","description":"...","products_count":...}}]"""
+
+            response = model.generate_content(prompt)
+            text = response.text.strip()
+            # Strip markdown code blocks if present
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+            data = _json.loads(text)
+            leads = []
+            for item in data:
+                leads.append(Lead(
+                    name=item.get("name", ""),
+                    website=item.get("website", ""),
+                    email=item.get("email", ""),
+                    phone=item.get("phone", ""),
+                    city=item.get("city", ""),
+                    description=item.get("description", ""),
+                    products_count=item.get("products_count", 0),
+                    source="gemini",
+                ))
+            logger.info(f"[ResearchAgent] Gemini generated {len(leads)} leads for '{niche}'")
+            return leads
+
+        except Exception as e:
+            logger.warning(f"[ResearchAgent] Gemini lead generation failed: {e}")
+            return []
 
     def _filter_already_contacted(self, leads: List[Lead]) -> List[Lead]:
         """Filter out leads that already exist in the DB (by website, phone, or email)."""
@@ -372,7 +439,7 @@ class ResearchAgent:
         except Exception as e:
             logger.debug(f"[ResearchAgent] Prom enrichment failed for {lead.name}: {e}")
 
-    def _search_google_maps(self, count: int) -> List[Lead]:
+    def _search_google_maps(self, count: int, niche: str = "косметика") -> List[Lead]:
         """Пошук через Google Maps Places API з Place Details enrichment."""
         api_key = self._api_keys.get("GOOGLE_MAPS_API_KEY") or os.getenv("GOOGLE_MAPS_API_KEY")
         if not api_key:
@@ -380,7 +447,7 @@ class ResearchAgent:
             return []
 
         leads = []
-        queries = ["косметика виробник Україна", "cosmetics wholesale Ukraine"]
+        queries = [f"{niche} виробник Україна", f"{niche} оптом Україна", f"{niche} інтернет-магазин"]
 
         for query in queries:
             if len(leads) >= count:
@@ -498,7 +565,7 @@ class ResearchAgent:
         '"Працює на Horoshop" косметика',
     ]
 
-    def _search_google_custom(self, count: int) -> List[Lead]:
+    def _search_google_custom(self, count: int, niche: str = "косметика") -> List[Lead]:
         """Пошук через Google Custom Search JSON API."""
         api_key = self._api_keys.get("GOOGLE_CUSTOM_SEARCH_API_KEY") or os.getenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
         cx = self._api_keys.get("GOOGLE_CUSTOM_SEARCH_CX") or os.getenv("GOOGLE_CUSTOM_SEARCH_CX")
@@ -507,7 +574,12 @@ class ResearchAgent:
             return []
 
         leads = []
-        for query in self.GOOGLE_SEARCH_QUERIES:
+        niche_queries = [
+            f"{niche} інтернет-магазин Україна",
+            f"{niche} купити оптом",
+            f"{niche} виробник Україна",
+        ]
+        for query in niche_queries:
             if len(leads) >= count:
                 break
             try:

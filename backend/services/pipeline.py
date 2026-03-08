@@ -80,7 +80,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
         # 1. Research
         await _agent_progress(run_id, 1, "Research", "running", "Пошук лідів...")
         await _log(run_id, "🔍 Researching leads...")
-        leads = orchestrator.research.search(count)
+        leads = orchestrator.research.search(count, niche=niche)
         await _agent_progress(run_id, 1, "Research", "done", f"Знайдено {len(leads)} лідів")
         await _log(run_id, f"Found {len(leads)} leads")
 
