@@ -240,8 +240,8 @@ MTP FULFILLMENT (продавець):
             proposal_data = {
                 "slug": slug,
                 "client_name": client_name,
-                "html_url": storage_url,
                 "client_data": {
+                    "html_url": storage_url,
                     "niche": niche_text,
                     "website": website,
                     "city": city,
@@ -253,13 +253,7 @@ MTP FULFILLMENT (продавець):
             try:
                 db.table("proposals").insert(proposal_data).execute()
             except Exception as e:
-                logger.warning(f"[ContentAgent] Proposal insert failed (trying without html_url): {e}")
-                # Retry without html_url if column doesn't exist yet
-                try:
-                    proposal_data.pop("html_url", None)
-                    db.table("proposals").insert(proposal_data).execute()
-                except Exception as e2:
-                    logger.warning(f"[ContentAgent] Proposal insert retry also failed: {e2}")
+                logger.warning(f"[ContentAgent] Proposal insert failed: {e}")
 
             logger.info(f"[ContentAgent] Web proposal uploaded: {storage_url}")
             return {"slug": slug, "url": storage_url, "proposal_id": slug}
@@ -291,16 +285,10 @@ MTP FULFILLMENT (продавець):
                 db.table("proposals").insert({
                     "slug": slug,
                     "client_name": lead.name,
-                    "html_url": storage_url,
+                    "client_data": {"html_url": storage_url},
                 }).execute()
-            except Exception:
-                try:
-                    db.table("proposals").insert({
-                        "slug": slug,
-                        "client_name": lead.name,
-                    }).execute()
-                except Exception as e:
-                    logger.warning(f"[ContentAgent] Fallback proposal DB insert failed: {e}")
+            except Exception as e:
+                logger.warning(f"[ContentAgent] Fallback proposal DB insert failed: {e}")
 
             logger.info(f"[ContentAgent] Fallback proposal uploaded: {storage_url}")
             return {"slug": slug, "url": storage_url, "proposal_id": slug}

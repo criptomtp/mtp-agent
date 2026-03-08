@@ -108,7 +108,12 @@ def get_proposal(slug: str):
     proposal = result.data[0]
 
     # If proposal has Gemini-generated HTML in Storage — redirect to it
-    html_url = proposal.get("html_url")
+    html_url = proposal.get("html_url") or ""
+    # Also check inside client_data (used when html_url column doesn't exist)
+    if not html_url:
+        cd = proposal.get("client_data")
+        if isinstance(cd, dict):
+            html_url = cd.get("html_url", "")
     if html_url:
         return RedirectResponse(html_url, status_code=302)
 
