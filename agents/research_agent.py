@@ -51,7 +51,7 @@ def clean_company_name(name: str) -> str:
 class ResearchAgent:
     """Шукає потенційних клієнтів косметики з багатьох джерел."""
 
-    PROM_SEARCH_URL = "https://prom.ua/search?search_term={query}"
+    PROM_SEARCH_URL = "https://prom.ua/ua/search?search_term={query}"
     PROM_COMPANY_URL = "https://prom.ua/c{company_id}"
     GOOGLE_MAPS_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
     GOOGLE_PLACE_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
@@ -212,10 +212,10 @@ class ResearchAgent:
         # Request 2x to account for dedup filtering
         remaining = lambda: max(0, count * 2 - len(leads))
         channel_methods = {
-            "prom": lambda: self._search_prom(remaining()),
+            "prom": lambda: self._search_prom(remaining(), niche=niche),
             "google_maps": lambda: self._search_google_maps(remaining(), niche=niche),
             "google_search": lambda: self._search_google_custom(remaining(), niche=niche),
-            "olx": lambda: self._search_olx(remaining()),
+            "olx": lambda: self._search_olx(remaining(), niche=niche),
             "instagram": lambda: self._search_instagram(remaining()),
             "facebook": lambda: self._search_facebook(remaining()),
         }
@@ -238,6 +238,7 @@ class ResearchAgent:
             logger.info(f"[ResearchAgent] Scrapers returned {len(leads)}/{count}, using Gemini fallback for '{niche}'")
             try:
                 gemini_leads = self._generate_leads_gemini(count - len(leads), niche)
+                gemini_leads = self._filter_already_contacted(gemini_leads)
                 _add_leads(gemini_leads)
             except Exception as e:
                 logger.warning(f"[ResearchAgent] Gemini fallback failed: {e}")
@@ -270,16 +271,22 @@ class ResearchAgent:
             model = genai.GenerativeModel("gemini-2.0-flash")
 
             prompt = f"""Ти — експерт з B2B лідогенерації в Україні.
-Згенеруй {count} реалістичних потенційних клієнтів (українські компанії) у ніші "{niche}",
+Згенеруй {count} УНІКАЛЬНИХ потенційних клієнтів (українські компанії) у ніші "{niche}",
 яким може бути корисний фулфілмент-сервіс (зберігання, пакування, доставка товарів).
 
+ВАЖЛИВО:
+- Кожна компанія має бути РІЗНА — різні назви, міста, розміри
+- Назви мають бути специфічні для ніші "{niche}", НЕ загальні
+- Різні міста України (не тільки Київ)
+- Різний масштаб бізнесу (від малих до великих)
+
 Для кожного ліда вкажи:
-- name: назва компанії (реалістична українська назва)
+- name: назва компанії (реалістична, специфічна для ніші "{niche}")
 - website: правдоподібний URL (формат https://example.com.ua)
 - email: правдоподібний email
 - phone: телефон у форматі +380XXXXXXXXX
-- city: місто в Україні
-- description: короткий опис бізнесу (1-2 речення)
+- city: місто в Україні (різні міста!)
+- description: короткий опис бізнесу саме у ніші "{niche}" (1-2 речення)
 - products_count: приблизна кількість товарних позицій (число)
 
 Відповідь ТІЛЬКИ у форматі JSON масив, без markdown:
@@ -345,11 +352,20 @@ class ResearchAgent:
             logger.warning(f"[Research] Дедуплікація не вдалась: {e}")
             return leads
 
-    def _search_prom(self, count: int) -> List[Lead]:
-        """Парсинг продавців косметики з Prom.ua з enrichment."""
+    def _search_prom(self, count: int, niche: str = "косметика") -> List[Lead]:
+        """Парсинг продавців з Prom.ua по ніші з enrichment."""
         leads = []
 
-        for query in self.PROM_QUERIES:
+        # Dynamic queries based on niche
+        queries = [
+            f"{niche} виробник",
+            f"{niche} магазин",
+            f"{niche} оптом",
+            f"{niche} інтернет магазин",
+            niche,
+        ]
+
+        for query in queries:
             if len(leads) >= count:
                 break
             try:
@@ -651,12 +667,13 @@ class ResearchAgent:
         "натуральна косметика",
     ]
 
-    def _search_olx(self, count: int) -> List[Lead]:
-        """Парсинг бізнес-профілів з OLX.ua."""
+    def _search_olx(self, count: int, niche: str = "косметика") -> List[Lead]:
+        """Парсинг бізнес-профілів з OLX.ua по ніші."""
         leads = []
         seen_sellers: set = set()
 
-        for query in self.OLX_QUERIES:
+        queries = [f"{niche} оптом", f"{niche} виробник", niche]
+        for query in queries:
             if len(leads) >= count:
                 break
             try:
