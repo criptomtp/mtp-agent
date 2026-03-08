@@ -362,66 +362,88 @@ class ResearchAgent:
     }
 
     def _search_google(self, count: int, niche: str = "косметика") -> List[Lead]:
-        """Search Google via direct HTTP request — parse <h3> and <cite>/href for leads."""
+        """Search Google via direct HTTP request — parse div.g blocks for leads."""
         from urllib.parse import urlparse, quote_plus
 
         leads = []
+        seen_domains: set = set()
         queries = [
-            f"{niche} інтернет магазин Україна сайт",
+            f"{niche} інтернет магазин Україна",
             f"{niche} оптом Україна купити",
-            f"{niche} виробник Україна",
+            f"{niche} виробник Україна сайт",
         ]
 
         for query in queries:
             if len(leads) >= count:
                 break
             try:
-                url = f"https://www.google.com/search?q={quote_plus(query)}&num=10&hl=uk"
+                url = f"https://www.google.com/search?q={quote_plus(query)}&num=20&hl=uk"
                 resp = requests.get(url, headers=self.HEADERS, timeout=10)
                 resp.raise_for_status()
                 soup = BeautifulSoup(resp.text, "lxml")
 
-                # Each search result lives in a <div class="g"> or similar container
-                # We look for <a> tags with real hrefs + <h3> for titles
-                for a_tag in soup.select("a[href]"):
+                # Parse structured result blocks (div.g or div[data-ved])
+                blocks = soup.select("div.g, div[data-ved]")
+                for block in blocks:
                     if len(leads) >= count:
                         break
 
-                    href = a_tag.get("href", "")
-                    # Google wraps links in /url?q=... or direct https://
-                    if href.startswith("/url?q="):
-                        href = href.split("/url?q=")[1].split("&")[0]
-                    if not href.startswith("http"):
+                    # Extract company name from <h3>
+                    h3 = block.select_one("h3")
+                    if not h3:
                         continue
 
-                    parsed = urlparse(href)
+                    # Extract URL: try <cite>, then <a href>
+                    site_url = ""
+                    cite = block.select_one("cite, span.tjvcx")
+                    if cite:
+                        cite_text = cite.get_text(strip=True)
+                        if cite_text.startswith("http"):
+                            site_url = cite_text.split(" ")[0]
+                        elif "." in cite_text:
+                            site_url = "https://" + cite_text.split(" ")[0].split(" ›")[0]
+
+                    if not site_url:
+                        a_tag = block.select_one("a[href^='http']")
+                        if not a_tag:
+                            a_tag = block.select_one("a[href^='/url?q=']")
+                        if a_tag:
+                            href = a_tag.get("href", "")
+                            if href.startswith("/url?q="):
+                                href = href.split("/url?q=")[1].split("&")[0]
+                            site_url = href
+
+                    if not site_url or not site_url.startswith("http"):
+                        continue
+
+                    parsed = urlparse(site_url)
                     domain = parsed.netloc.replace("www.", "")
 
-                    # Skip aggregators and Google itself
+                    # Only .ua domains
+                    if not domain.endswith(".ua"):
+                        continue
+
+                    # Skip aggregators
                     if any(skip in domain for skip in self.SKIP_DOMAINS):
                         continue
 
                     # Skip already seen domains
-                    if any(domain in (getattr(l, "website", "") or "") for l in leads):
+                    if domain in seen_domains:
                         continue
+                    seen_domains.add(domain)
 
-                    # Get company name from <h3> inside the link, or from domain
-                    h3 = a_tag.select_one("h3")
-                    if h3:
-                        raw_name = h3.get_text(strip=True)
-                        # Clean title: take first part before separators
-                        name = clean_company_name(
-                            raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
-                        )
-                    else:
+                    raw_name = h3.get_text(strip=True)
+                    name = clean_company_name(
+                        raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                    )
+                    if len(name) < 3:
                         name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
-
                     if len(name) < 3:
                         continue
 
                     lead = Lead(
                         name=name,
-                        website=href,
+                        website=site_url,
                         description=f"Google: {query}",
                         source="google",
                     )
