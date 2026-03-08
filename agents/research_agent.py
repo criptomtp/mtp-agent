@@ -27,6 +27,7 @@ class Lead:
     description: str = ""
     products_count: int = 0
     source: str = ""
+    contact_source: str = ""
 
 
 def _normalize_name(name: str) -> str:
@@ -369,17 +370,23 @@ class ResearchAgent:
                     lead = Lead(
                         name=name,
                         website=website,
-                        description=f"Продавець косметики на Prom.ua (запит: {query})",
+                        description=f"Продавець на Prom.ua (запит: {query})",
                         source="prom.ua",
                     )
 
-                    # Try to enrich from company page
+                    # Try to enrich from company page (get external website, phone, email)
                     if website and "prom.ua" in website:
                         self._enrich_lead_from_prom(lead)
 
-                    # Scrape contacts from website if available
+                    # Scrape contacts from external website if available
                     if lead.website and "prom.ua" not in lead.website:
                         self._scrape_contact_from_website(lead)
+                        if lead.email or lead.phone:
+                            lead.contact_source = "website"
+
+                    # Mark if contacts still missing
+                    if not lead.email and not lead.phone:
+                        lead.contact_source = "manual_needed"
 
                     leads.append(lead)
 
@@ -429,12 +436,23 @@ class ResearchAgent:
                 if nums:
                     lead.products_count = int(nums[0])
 
-            # Company website (external)
-            ext_site = soup.select_one("[data-qaid='company_site'] a, .company-site a")
+            # Company website (external) — try multiple selectors
+            ext_site = soup.select_one("[data-qaid='company_site'] a, .company-site a, a[rel='nofollow'][href^='http']")
             if ext_site and ext_site.get("href"):
                 ext_url = ext_site["href"]
                 if ext_url.startswith("http") and "prom.ua" not in ext_url:
                     lead.website = ext_url
+                    lead.contact_source = "prom_profile"
+
+            # If no external website found, try links in page that look like company sites
+            if not lead.website or "prom.ua" in lead.website:
+                for a in soup.select("a[href^='http']"):
+                    href = a.get("href", "")
+                    if href and "prom.ua" not in href and "google." not in href and "facebook." not in href:
+                        if ".ua" in href or ".com" in href:
+                            lead.website = href
+                            lead.contact_source = "prom_link"
+                            break
 
         except Exception as e:
             logger.debug(f"[ResearchAgent] Prom enrichment failed for {lead.name}: {e}")

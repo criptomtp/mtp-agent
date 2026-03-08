@@ -163,7 +163,7 @@ def _scrape_website(url: str) -> Dict[str, Any]:
         return {}
 
 
-def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any]) -> tuple:
+def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any], niche: str = "") -> tuple:
     """Returns (system_prompt, user_prompt) for the AI analysis."""
     website_section = "Немає даних"
     if website_data:
@@ -207,12 +207,15 @@ def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any]) -
 ## Дані з сайту:
 {website_section}
 
+## Ніша клієнта: {niche or 'не вказано'}
+
 ## Про MTP Fulfillment:
 - 3PL склад у Борисполі (біля Києва) та Білогородці
 - 60 000+ відправок на місяць
 - 7+ років на ринку
-- Клієнти: KRKR (корейська косметика, ріст x10), ELEMIS Ukraine (7 років), ORNER
-- Спеціалізація: e-commerce, краса, здоров'я, одяг
+- Один з наших клієнтів у ніші {niche or 'e-commerce'} виріс x10 за рік завдяки аутсорсу логістики
+- Інший клієнт працює з нами 7+ років — стабільність і довіра
+- Спеціалізація: e-commerce, краса, здоров'я, одяг, електроніка, товари для дому
 - Перевага: локальні тарифи Нової Пошти для клієнтів не з Києва
 - Кабінет клієнта 24/7, API інтеграції
 
@@ -278,7 +281,7 @@ class AnalysisAgent:
         except Exception:
             return {}
 
-    def analyze(self, lead: Lead, tariffs: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    def analyze(self, lead: Lead, tariffs: Optional[List[Dict[str, Any]]] = None, niche: str = "") -> Dict[str, Any]:
         """Аналіз ліда: scrape website → Gemini → Claude → fallback."""
         website_data = _scrape_website(lead.website)
         if website_data:
@@ -291,11 +294,11 @@ class AnalysisAgent:
         model_name = settings.get("agents", {}).get("analysis", {}).get("model", "gemini-2.5-flash")
         custom_prompts = settings.get("prompts", {})
 
-        result = self._try_gemini(lead, tariffs_text, website_data, model_name=model_name, custom_prompts=custom_prompts)
+        result = self._try_gemini(lead, tariffs_text, website_data, model_name=model_name, custom_prompts=custom_prompts, niche=niche)
         if not result:
-            result = self._try_claude(lead, tariffs_text, website_data, custom_prompts=custom_prompts)
+            result = self._try_claude(lead, tariffs_text, website_data, custom_prompts=custom_prompts, niche=niche)
         if not result:
-            result = self._fallback_analysis(lead)
+            result = self._fallback_analysis(lead, niche=niche)
 
         scoring = score_lead(lead, result)
         result["score"] = scoring["score"]
@@ -305,9 +308,9 @@ class AnalysisAgent:
         return result
 
     def _get_prompts(self, lead: Lead, tariffs_text: str, website_data: Dict[str, str],
-                      custom_prompts: Optional[Dict[str, str]] = None) -> tuple:
+                      custom_prompts: Optional[Dict[str, str]] = None, niche: str = "") -> tuple:
         """Get prompts: custom from settings or default from _build_prompt."""
-        system_prompt, user_prompt = _build_prompt(lead, tariffs_text, website_data)
+        system_prompt, user_prompt = _build_prompt(lead, tariffs_text, website_data, niche=niche)
         if custom_prompts:
             if custom_prompts.get("analysis_system"):
                 system_prompt = custom_prompts["analysis_system"]
@@ -334,7 +337,7 @@ class AnalysisAgent:
 
     def _try_gemini(self, lead: Lead, tariffs_text: str, website_data: Dict[str, str],
                     model_name: str = "gemini-2.5-flash",
-                    custom_prompts: Optional[Dict[str, str]] = None) -> Dict[str, Any] | None:
+                    custom_prompts: Optional[Dict[str, str]] = None, niche: str = "") -> Dict[str, Any] | None:
         api_key = self._get_key("GEMINI_API_KEY")
         if not api_key:
             print("  [AnalysisAgent] GEMINI_API_KEY не налаштований.")
@@ -343,7 +346,7 @@ class AnalysisAgent:
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            system_prompt, user_prompt = self._get_prompts(lead, tariffs_text, website_data, custom_prompts)
+            system_prompt, user_prompt = self._get_prompts(lead, tariffs_text, website_data, custom_prompts, niche=niche)
             logger.info(f"  [AnalysisAgent] Using model: {model_name}")
             model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
             response = model.generate_content(user_prompt)
@@ -356,7 +359,7 @@ class AnalysisAgent:
             return None
 
     def _try_claude(self, lead: Lead, tariffs_text: str, website_data: Dict[str, str],
-                    custom_prompts: Optional[Dict[str, str]] = None) -> Dict[str, Any] | None:
+                    custom_prompts: Optional[Dict[str, str]] = None, niche: str = "") -> Dict[str, Any] | None:
         api_key = self._get_key("ANTHROPIC_API_KEY")
         if not api_key:
             print("  [AnalysisAgent] ANTHROPIC_API_KEY не налаштований.")
@@ -365,7 +368,7 @@ class AnalysisAgent:
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
-            system_prompt, user_prompt = self._get_prompts(lead, tariffs_text, website_data, custom_prompts)
+            system_prompt, user_prompt = self._get_prompts(lead, tariffs_text, website_data, custom_prompts, niche=niche)
             message = client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=1500,
@@ -380,7 +383,7 @@ class AnalysisAgent:
             print(f"  [AnalysisAgent] Claude помилка: {e}")
             return None
 
-    def _fallback_analysis(self, lead: Lead) -> Dict[str, Any]:
+    def _fallback_analysis(self, lead: Lead, niche: str = "") -> Dict[str, Any]:
         """Розумний fallback без API."""
         print("  [AnalysisAgent] Використовую fallback аналіз.")
 
@@ -394,24 +397,25 @@ class AnalysisAgent:
 
         city_note = f" з {lead.city}" if lead.city else ""
         is_outside_kyiv = bool(lead.city) and "київ" not in (lead.city or "").lower()
+        niche_label = niche or "e-commerce"
 
         return {
             "hook": f"{lead.name}: час масштабуватись без болю",
             "client_insight": (
-                f"{lead.name} — компанія{city_note}, що працює у сфері косметики. "
+                f"{lead.name} — компанія{city_note}, що працює у сфері {niche_label}. "
                 f"{'Каталог з ' + str(products) + ' товарів потребує системної логістики.' if products > 0 else 'Потребує надійного логістичного партнера.'}"
             ),
             "pain_points": [
-                {"title": "Час на рутину", "description": "Пакування і відправка замовлень забирають години, які можна витратити на розвиток бренду"},
+                {"title": "Час на рутину", "description": f"Пакування і відправка замовлень у ніші {niche_label} забирають години, які можна витратити на розвиток бренду"},
                 {"title": "Помилки комплектації", "description": "Кожна помилка — це повернення, негативний відгук і втрачений клієнт"},
                 {"title": "Піки продажів", "description": "Сезонні акції та розпродажі перевантажують команду, замовлення затримуються"},
             ],
             "mtp_fit": (
                 f"МТП обробляє 60 000+ відправок щомісяця — {lead.name} отримає ту саму швидкість і точність, "
-                f"що й наші клієнти KRKR та ELEMIS Ukraine."
+                f"що й один з наших клієнтів у ніші {niche_label}, який виріс x10 за рік."
             ),
             "key_benefits": [
-                {"benefit": "Швидка доставка з Борисполя", "proof": "Клієнт KRKR виріс x10 за рік завдяки швидкій логістиці"},
+                {"benefit": "Швидка доставка з Борисполя", "proof": f"Один з наших клієнтів у ніші {niche_label} виріс x10 за рік завдяки швидкій логістиці"},
                 {"benefit": "Прозорість 24/7", "proof": "Кабінет клієнта з трекінгом кожного замовлення в реальному часі"},
                 {"benefit": "Економія на тарифах НП", "proof": "Локальні тарифи Нової Пошти для клієнтів не з Києва"},
             ],

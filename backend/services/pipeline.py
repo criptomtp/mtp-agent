@@ -97,7 +97,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             # 2. Analysis
             await _agent_progress(run_id, 2, "Analysis", "running", f"{progress} Аналіз: {lead_name}")
             await _log(run_id, f"{progress} 🧠 Analyzing: {lead_name}")
-            analysis = orchestrator.analysis.analyze(lead, tariffs=tariffs)
+            analysis = orchestrator.analysis.analyze(lead, tariffs=tariffs, niche=niche)
             score = analysis.get("score", 0) if isinstance(analysis, dict) else 0
             grade = analysis.get("grade", "?") if isinstance(analysis, dict) else "?"
             await _agent_progress(run_id, 2, "Analysis", "done", f"{progress} {lead_name}: {grade} ({score}/10)")
@@ -125,27 +125,28 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
             # Save lead to DB
             web_url = files.get("web_url", "")
-            lead_record = (
-                db.table("leads")
-                .insert(
-                    {
-                        "run_id": run_id,
-                        "name": lead.name,
-                        "website": lead.website or "",
-                        "email": lead.email or "",
-                        "phone": lead.phone or "",
-                        "city": lead.city or "",
-                        "source": lead.source or "",
-                        "status": "new",
-                        "analysis_json": analysis if isinstance(analysis, dict) else {},
-                        "outreach_status": outreach_status,
-                        "score": analysis.get("score", 0) if isinstance(analysis, dict) else 0,
-                        "score_grade": analysis.get("grade", "D") if isinstance(analysis, dict) else "D",
-                        "proposal_url": web_url,
-                    }
-                )
-                .execute()
-            )
+            lead_data = {
+                "run_id": run_id,
+                "name": lead.name,
+                "website": lead.website or "",
+                "email": lead.email or "",
+                "phone": lead.phone or "",
+                "city": lead.city or "",
+                "source": lead.source or "",
+                "niche": niche,
+                "status": "new",
+                "analysis_json": analysis if isinstance(analysis, dict) else {},
+                "outreach_status": outreach_status,
+                "score": analysis.get("score", 0) if isinstance(analysis, dict) else 0,
+                "score_grade": analysis.get("grade", "D") if isinstance(analysis, dict) else "D",
+                "proposal_url": web_url,
+            }
+            try:
+                lead_record = db.table("leads").insert(lead_data).execute()
+            except Exception:
+                # niche column may not exist yet — retry without it
+                lead_data.pop("niche", None)
+                lead_record = db.table("leads").insert(lead_data).execute()
             lead_id = lead_record.data[0]["id"]
 
             # Save file records — upload HTML to Supabase Storage, fall back to local URL
