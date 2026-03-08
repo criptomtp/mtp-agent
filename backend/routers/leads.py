@@ -2,7 +2,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from backend.services.database import get_supabase
@@ -88,6 +88,12 @@ async def get_lead_proposal(lead_id: str):
             return HTMLResponse("<h1>Лід не знайдений</h1>", status_code=404)
 
         lead_data = lead.data
+
+        # Redirect to web proposal if available
+        proposal_url = lead_data.get("proposal_url", "")
+        if proposal_url:
+            return RedirectResponse(url=proposal_url, status_code=302)
+
         safe_name = re.sub(r"[^\w\s-]", "", lead_data.get("name", "")).strip().replace(" ", "_")[:50]
         run_id = lead_data.get("run_id", "test")
 

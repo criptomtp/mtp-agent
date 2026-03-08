@@ -102,8 +102,8 @@ export default function Leads() {
   const pptxFile = files.find((f: any) => f.file_type === "pptx");
   const emailFile = files.find((f: any) => f.file_type === "email");
   const contactFile = files.find((f: any) => f.file_type === "contact_card");
-  const proposalUrl = selected && htmlFile
-    ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal`
+  const proposalUrl = selected
+    ? (selected.proposal_url || (htmlFile ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal` : null))
     : null;
   const pptxUrl = selected && pptxFile
     ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal.pptx`
@@ -326,11 +326,11 @@ export default function Leads() {
                     <span className="text-2xl">🎯</span>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-gray-800">Комерційна пропозиція</p>
-                      <p className="text-xs text-gray-400">proposal.html</p>
+                      <p className="text-xs text-gray-400">{selected?.proposal_url ? "web-версія для клієнта" : "proposal.html"}</p>
                     </div>
                     <a href={proposalUrl} target="_blank" rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-mtp-blue text-white text-sm rounded hover:bg-blue-800 transition">
-                      Відкрити
+                      Відкрити КП
                     </a>
                   </div>
                 )}
