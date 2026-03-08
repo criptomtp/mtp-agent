@@ -97,19 +97,30 @@ def create_proposal(body: CreateProposalIn, authorization: Optional[str] = Heade
 
 @router.get("/{slug}")
 def get_proposal(slug: str):
+    from fastapi.responses import RedirectResponse
+
     db = get_supabase_admin()
     result = db.table("proposals").select("*").eq("slug", slug).execute()
 
     if not result.data:
         return JSONResponse({"error": "Not found"}, status_code=404)
 
-    return result.data[0]
+    proposal = result.data[0]
+
+    # If proposal has Gemini-generated HTML in Storage — redirect to it
+    html_url = proposal.get("html_url")
+    if html_url:
+        return RedirectResponse(html_url, status_code=302)
+
+    # Otherwise return JSON for React-rendered ProposalPage
+    return proposal
 
 
 # --- Track proposal events ---
 
 class TrackEventIn(BaseModel):
-    proposal_id: str
+    proposal_id: Optional[str] = None
+    slug: Optional[str] = None
     event: str
     ts: Optional[str] = None
 
@@ -120,8 +131,21 @@ async def track_event(body: TrackEventIn, request: Request):
     ua = request.headers.get("user-agent", "")
     ref = request.headers.get("referer", "")
 
+    # Resolve proposal_id from slug if needed
+    proposal_id = body.proposal_id
+    if not proposal_id and body.slug:
+        try:
+            result = db.table("proposals").select("id").eq("slug", body.slug).execute()
+            if result.data:
+                proposal_id = result.data[0]["id"]
+        except Exception:
+            pass
+
+    if not proposal_id:
+        return JSONResponse({"error": "proposal_id or slug required"}, status_code=400)
+
     db.table("proposal_events").insert({
-        "proposal_id": body.proposal_id,
+        "proposal_id": proposal_id,
         "event": body.event,
         "ts": body.ts or datetime.now(timezone.utc).isoformat(),
         "ua": ua,
@@ -131,13 +155,13 @@ async def track_event(body: TrackEventIn, request: Request):
     # Update views on 'open' event
     if body.event == "open":
         try:
-            result = db.table("proposals").select("views_count, client_name, slug").eq("id", body.proposal_id).execute()
+            result = db.table("proposals").select("views_count, client_name, slug").eq("id", proposal_id).execute()
             proposal = result.data[0] if result.data else None
             if proposal:
                 db.table("proposals").update({
                     "views_count": (proposal.get("views_count") or 0) + 1,
                     "last_viewed_at": datetime.now(timezone.utc).isoformat(),
-                }).eq("id", body.proposal_id).execute()
+                }).eq("id", proposal_id).execute()
 
                 # Notify on first view
                 if (proposal.get("views_count") or 0) == 0 and proposal.get("client_name"):
@@ -153,7 +177,7 @@ async def track_event(body: TrackEventIn, request: Request):
     # Notify on key engagement events
     if body.event in ("scrolled_to_end", "zoom_booked"):
         try:
-            result = db.table("proposals").select("client_name").eq("id", body.proposal_id).execute()
+            result = db.table("proposals").select("client_name").eq("id", proposal_id).execute()
             if result.data and result.data[0].get("client_name"):
                 await notify_telegram(body.event, result.data[0]["client_name"])
         except Exception:

@@ -85,13 +85,19 @@ class ContentAgent:
 
         self._generate_email(lead, analysis, email_path)
 
-        # Web proposal — Gemini generates unique HTML
+        # Web proposal — Gemini generates unique HTML, fallback to template
         web_proposal = None
         try:
             web_proposal = self.create_web_proposal(lead, analysis, brand_style=brand_style,
                                                      tariffs=tariffs, niche=niche)
         except Exception as e:
             logger.error(f"Web proposal creation failed: {e}", exc_info=True)
+
+        if not web_proposal:
+            try:
+                web_proposal = self._create_web_proposal_fallback(lead, analysis, brand_style=brand_style, tariffs=tariffs)
+            except Exception as e:
+                logger.error(f"Web proposal fallback also failed: {e}", exc_info=True)
 
         result = {"html": html_path, "email": email_path, "pptx": pptx_path}
         if web_proposal:
@@ -247,16 +253,60 @@ MTP FULFILLMENT (продавець):
             try:
                 db.table("proposals").insert(proposal_data).execute()
             except Exception as e:
-                logger.warning(f"[ContentAgent] Could not save proposal record: {e}")
+                logger.warning(f"[ContentAgent] Proposal insert failed (trying without html_url): {e}")
+                # Retry without html_url if column doesn't exist yet
+                try:
+                    proposal_data.pop("html_url", None)
+                    db.table("proposals").insert(proposal_data).execute()
+                except Exception as e2:
+                    logger.warning(f"[ContentAgent] Proposal insert retry also failed: {e2}")
 
-            frontend_url = os.getenv("MTP_FRONTEND_URL", "https://mtp-lead-agent.vercel.app")
-            url = f"{frontend_url}/proposals/{slug}"
-
-            logger.info(f"[ContentAgent] Web proposal uploaded: {url}")
-            return {"slug": slug, "url": url, "proposal_id": slug}
+            logger.info(f"[ContentAgent] Web proposal uploaded: {storage_url}")
+            return {"slug": slug, "url": storage_url, "proposal_id": slug}
 
         except Exception as e:
             logger.error(f"[ContentAgent] Supabase upload failed: {e}", exc_info=True)
+            return None
+
+    def _create_web_proposal_fallback(self, lead: "Lead", analysis: Dict[str, Any],
+                                      brand_style: Optional[Dict[str, str]] = None,
+                                      tariffs=None) -> Optional[Dict[str, str]]:
+        """Fallback: upload template HTML to Supabase Storage if Gemini fails."""
+        import hashlib
+
+        try:
+            from backend.services.database import get_supabase, upload_to_storage
+
+            html = self._generate_html_proposal(lead, analysis, tariffs)
+            slug = hashlib.md5(f"{lead.name}-fallback-{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+
+            storage_path = f"web/{slug}/index.html"
+            storage_url = upload_to_storage("proposals", storage_path, html.encode("utf-8"),
+                                            content_type="text/html; charset=utf-8")
+            if not storage_url:
+                return None
+
+            db = get_supabase()
+            try:
+                db.table("proposals").insert({
+                    "slug": slug,
+                    "client_name": lead.name,
+                    "html_url": storage_url,
+                }).execute()
+            except Exception:
+                try:
+                    db.table("proposals").insert({
+                        "slug": slug,
+                        "client_name": lead.name,
+                    }).execute()
+                except Exception as e:
+                    logger.warning(f"[ContentAgent] Fallback proposal DB insert failed: {e}")
+
+            logger.info(f"[ContentAgent] Fallback proposal uploaded: {storage_url}")
+            return {"slug": slug, "url": storage_url, "proposal_id": slug}
+
+        except Exception as e:
+            logger.error(f"[ContentAgent] Fallback upload failed: {e}", exc_info=True)
             return None
 
     # ── PPTX helpers ──
