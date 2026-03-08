@@ -19,7 +19,7 @@ class Orchestrator:
     def __init__(self, send_email: bool = False, api_keys: Optional[Dict[str, str]] = None, tariffs: Optional[List[Dict[str, Any]]] = None, channels: Optional[List[str]] = None):
         self.research = ResearchAgent(api_keys=api_keys, channels=channels)
         self.analysis = AnalysisAgent(api_keys=api_keys)
-        self.content = ContentAgent()
+        self.content = ContentAgent(api_keys=api_keys)
         self.outreach = OutreachAgent()
         self.send_email = send_email
         self.tariffs = tariffs

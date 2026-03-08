@@ -56,10 +56,11 @@ def _escape_html(text: str) -> str:
 class ContentAgent:
     """Генерує HTML презентацію та email текст."""
 
-    def __init__(self):
-        pass
+    def __init__(self, api_keys: Optional[Dict[str, str]] = None):
+        self._api_keys = api_keys or {}
 
-    def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str, tariffs=None, brand_style: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str,
+                 tariffs=None, brand_style: Optional[Dict[str, str]] = None, niche: str = "") -> Dict[str, str]:
         """Генерує HTML, PPTX та email.txt. Повертає шляхи до файлів."""
         os.makedirs(output_dir, exist_ok=True)
 
@@ -84,10 +85,11 @@ class ContentAgent:
 
         self._generate_email(lead, analysis, email_path)
 
-        # Web proposal via proposals API
+        # Web proposal — Gemini generates unique HTML
         web_proposal = None
         try:
-            web_proposal = self.create_web_proposal(lead, analysis, brand_style=brand_style)
+            web_proposal = self.create_web_proposal(lead, analysis, brand_style=brand_style,
+                                                     tariffs=tariffs, niche=niche)
         except Exception as e:
             logger.error(f"Web proposal creation failed: {e}", exc_info=True)
 
@@ -97,70 +99,164 @@ class ContentAgent:
             result["web_proposal"] = web_proposal
         return result
 
-    def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any], brand_style: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
-        """Create a web proposal via proposals API.
+    def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any],
+                            brand_style: Optional[Dict[str, str]] = None,
+                            tariffs=None, niche: str = "") -> Optional[Dict[str, str]]:
+        """Generate unique HTML proposal via Gemini AI and upload to Supabase Storage.
 
         Returns {'slug': ..., 'url': ..., 'proposal_id': ...} or None on error.
         """
-        api_secret = os.getenv("MTP_CABINET_API_SECRET", "dev-secret")
-        api_url = os.getenv("MTP_API_URL", "https://mtp-agent-production.up.railway.app") + "/api/proposals/create"
+        import uuid
+        import hashlib
 
-        pain_points_text = ""
-        for p in analysis.get("pain_points", []):
+        api_key = self._api_keys.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("[ContentAgent] GEMINI_API_KEY not set, cannot generate web proposal")
+            return None
+
+        # Build analysis text
+        pain_points = analysis.get("pain_points", [])
+        pain_titles = []
+        for p in pain_points:
             if isinstance(p, dict):
-                pain_points_text += f"{p.get('title', '')}: {p.get('description', '')}; "
+                pain_titles.append(p.get("title", ""))
             else:
-                pain_points_text += f"{p}; "
+                pain_titles.append(str(p))
 
-        payload = {
-            "client_name": lead.name,
-            "client_data": {
-                "hook": analysis.get("hook", ""),
-                "client_insight": analysis.get("client_insight", ""),
-                "description": getattr(lead, "description", "") or "",
-                "blockers": pain_points_text.strip("; "),
-                "goal": getattr(lead, "goal", "") or "Запустити e-commerce",
-                "market": getattr(lead, "category", "") or "",
-                "city": getattr(lead, "city", "") or "",
-                "products_count": getattr(lead, "products_count", None),
-                "website": getattr(lead, "website", "") or "",
-                "pain_points": analysis.get("pain_points", []),
-                "key_benefits": analysis.get("key_benefits", []),
-                "mtp_fit": analysis.get("mtp_fit", ""),
-                "score": analysis.get("score"),
-                "grade": analysis.get("grade", ""),
-                "brand_style": brand_style or {},
-            },
-            "pricing_data": {
-                "storage": "650 грн / м³ / міс",
-                "receiving": "3 грн / одиниця",
-                "shipping": "22 грн / замовлення",
-                "estimate_range": "8 000 – 14 000 грн",
-                "estimate_note": "На 300-800 замовлень/міс",
-                "tariffs": [
-                    {"name": name, "price": price}
-                    for name, price in _build_tariffs_rows()
-                ],
-                "estimate": analysis.get("pricing_estimate", {}) if isinstance(analysis.get("pricing_estimate"), dict) else {},
-            },
-        }
+        benefits = analysis.get("key_benefits", [])
+        benefit_titles = []
+        for b in benefits:
+            if isinstance(b, dict):
+                benefit_titles.append(b.get("benefit", ""))
+            else:
+                benefit_titles.append(str(b))
 
-        resp = requests.post(
-            api_url,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {api_secret}",
-                "Content-Type": "application/json",
-            },
-            timeout=15,
+        score = analysis.get("score", 0)
+        grade = analysis.get("grade", "?")
+        analysis_text = (
+            f"Потенціал: {score}/10 ({grade}). "
+            f"Болі: {', '.join(pain_titles)}. "
+            f"Переваги MTP для клієнта: {', '.join(benefit_titles)}"
         )
 
-        if resp.status_code == 200:
-            data = resp.json()
-            logger.info(f"Web proposal created: {data.get('url', '')}")
-            return {"slug": data.get("slug", ""), "url": data.get("url", ""), "proposal_id": data.get("proposal_id", "")}
-        else:
-            logger.error(f"Web proposal API error {resp.status_code}: {resp.text}")
+        # Build tariffs text
+        tariff_rows = _build_tariffs_rows(tariffs)
+        tariffs_text = ", ".join([f"{name}: {price}" for name, price in tariff_rows])
+
+        # Brand style
+        bs = brand_style or {}
+        brand_primary = bs.get("primary_color", "#1A365D")
+        brand_secondary = bs.get("secondary_color", "#E53E3E")
+        brand_font = bs.get("font_family", "Inter")
+
+        # Generate slug
+        slug = hashlib.md5(f"{lead.name}-{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+
+        calendly_url = "https://calendly.com/mtpfulfillment/30min"
+        client_name = lead.name
+        website = getattr(lead, "website", "") or ""
+        city = getattr(lead, "city", "") or ""
+        niche_text = niche or "e-commerce"
+        api_base = os.getenv("MTP_API_URL", "https://mtp-agent-production.up.railway.app")
+
+        prompt = f"""Ти — топовий UX/UI дизайнер і копірайтер. Створи повну HTML-сторінку комерційної пропозиції від MTP Fulfillment для клієнта.
+
+КЛІЄНТ:
+- Назва: {client_name}
+- Ніша: {niche_text}
+- Сайт: {website}
+- Місто: {city}
+- Аналіз (болі, потенціал): {analysis_text}
+- Фірмовий стиль клієнта: primary={brand_primary}, secondary={brand_secondary}, font={brand_font}
+
+MTP FULFILLMENT (продавець):
+- Компанія: MTP Group Fulfillment, Бориспіль (біля Київ)
+- Колір бренду: #E53E3E (червоний), білий
+- 7+ років на ринку, 60K+ відправок/міс, 2 склади
+- Тарифи: {tariffs_text}
+- Контакти: mtpgrouppromo@gmail.com, +38 (050) 144-46-45, fulfillmentmtp.com.ua
+- Calendly: {calendly_url}
+
+ЗАВДАННЯ:
+Створи УНІКАЛЬНУ HTML сторінку яка:
+1. Використовує фірмові кольори КЛІЄНТА як основну палітру ({brand_primary} як домінантний)
+2. Додає MTP червоний (#E53E3E) як акцентний колір на CTA кнопках і важливих елементах
+3. Має УНІКАЛЬНУ структуру і layout — НЕ стандартний шаблон. Придумай щось оригінальне для цього клієнта
+4. Пише УНІКАЛЬНИЙ текст під цю нішу і цього клієнта — не загальні фрази
+5. Включає секції (але в унікальному порядку і стилі): hero з назвою клієнта, болі бізнесу, рішення від MTP, тарифи, соціальний доказ (KRKR/ORNER/ELEMIS), CTA
+6. Адаптивна (mobile-friendly)
+7. Без зовнішніх залежностей (тільки Google Fonts дозволені)
+8. Tracking: при завантаженні fetch('{api_base}/api/proposals/track', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{slug:'{slug}', event:'open'}})}})\
+
+ВАЖЛИВО: Поверни ТІЛЬКИ валідний HTML від <!DOCTYPE html> до </html>. Без markdown, без пояснень."""
+
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(prompt)
+            html = response.text.strip()
+
+            # Strip markdown fences if present
+            if html.startswith("```"):
+                html = html.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+            # Validate HTML
+            if not html.startswith("<!DOCTYPE html>") and not html.startswith("<!doctype html>"):
+                # Try to find DOCTYPE in response
+                idx = html.lower().find("<!doctype html>")
+                if idx >= 0:
+                    html = html[idx:]
+                else:
+                    logger.error("[ContentAgent] Gemini response is not valid HTML")
+                    return None
+
+            logger.info(f"[ContentAgent] Gemini generated {len(html)} bytes of unique HTML for {client_name}")
+
+        except Exception as e:
+            logger.error(f"[ContentAgent] Gemini HTML generation failed: {e}", exc_info=True)
+            return None
+
+        # Upload to Supabase Storage
+        try:
+            from backend.services.database import get_supabase, upload_to_storage
+
+            storage_path = f"web/{slug}/index.html"
+            storage_url = upload_to_storage("proposals", storage_path, html.encode("utf-8"),
+                                            content_type="text/html; charset=utf-8")
+
+            if not storage_url:
+                logger.error("[ContentAgent] Failed to upload HTML to Supabase Storage")
+                return None
+
+            # Save proposal record to DB
+            db = get_supabase()
+            proposal_data = {
+                "slug": slug,
+                "client_name": client_name,
+                "html_url": storage_url,
+                "client_data": {
+                    "niche": niche_text,
+                    "website": website,
+                    "city": city,
+                    "score": score,
+                    "grade": grade,
+                    "brand_style": bs,
+                },
+            }
+            try:
+                db.table("proposals").insert(proposal_data).execute()
+            except Exception as e:
+                logger.warning(f"[ContentAgent] Could not save proposal record: {e}")
+
+            frontend_url = os.getenv("MTP_FRONTEND_URL", "https://mtp-lead-agent.vercel.app")
+            url = f"{frontend_url}/proposals/{slug}"
+
+            logger.info(f"[ContentAgent] Web proposal uploaded: {url}")
+            return {"slug": slug, "url": url, "proposal_id": slug}
+
+        except Exception as e:
+            logger.error(f"[ContentAgent] Supabase upload failed: {e}", exc_info=True)
             return None
 
     # ── PPTX helpers ──

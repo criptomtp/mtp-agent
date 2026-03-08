@@ -129,8 +129,8 @@ def test_lead(body: TestLeadIn):
     # Generate content
     import tempfile
     output_dir = tempfile.mkdtemp(prefix="mtp_test_")
-    content_agent = ContentAgent()
-    files = content_agent.generate(lead, analysis, output_dir, tariffs=tariffs)
+    content_agent = ContentAgent(api_keys=api_keys)
+    files = content_agent.generate(lead, analysis, output_dir, tariffs=tariffs, niche="e-commerce")
 
     # Upload HTML presentation if generated
     html_url = None

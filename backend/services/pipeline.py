@@ -122,7 +122,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             lead_dir = os.path.join(results_dir, f"{i+1:02d}_{safe_name}")
             os.makedirs(lead_dir, exist_ok=True)
 
-            files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs, brand_style=brand_style)
+            files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs, brand_style=brand_style, niche=niche)
             html_path = files.get("html", "")
             email_path = files.get("email", "")
             pptx_path = files.get("pptx", "")
