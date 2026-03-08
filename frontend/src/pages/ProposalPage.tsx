@@ -18,6 +18,12 @@ interface Proposal {
     city?: string;
     products_count?: number;
     website?: string;
+    brand_style?: {
+      primary_color?: string;
+      secondary_color?: string;
+      font_family?: string;
+      brand_name?: string;
+    };
   };
   pricing_data: {
     tariffs?: Array<{ name: string; price: string }>;
@@ -76,6 +82,11 @@ export default function ProposalPage() {
 
   const d = proposal.client_data;
   const p = proposal.pricing_data;
+  const bs = d.brand_style;
+  const hasBrand = !!(bs?.primary_color && bs.primary_color !== "#1A365D");
+  const accent = "#d4a843"; // MTP gold
+  const clientPrimary = hasBrand ? bs!.primary_color! : "#080810";
+  const clientFont = bs?.font_family || "Playfair Display";
   const pains = d.pain_points || [];
   const benefits = d.key_benefits || [];
   const tariffs = p.tariffs || [
@@ -99,10 +110,23 @@ export default function ProposalPage() {
     window.print();
   };
 
+  const googleFontUrl = clientFont !== "Playfair Display"
+    ? `https://fonts.googleapis.com/css2?family=${encodeURIComponent(clientFont)}:wght@400;600;700&family=Playfair+Display:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap`
+    : "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap";
+
   return (
-    <div className="min-h-screen bg-[#080810] text-[#e8e4dc]" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div
+      className="min-h-screen bg-[#080810] text-[#e8e4dc]"
+      style={{
+        fontFamily: "'Inter', sans-serif",
+        // @ts-expect-error CSS custom properties
+        "--client-primary": clientPrimary,
+        "--client-accent": accent,
+        "--client-font": `'${clientFont}', 'Playfair Display', serif`,
+      }}
+    >
       {/* Google Fonts */}
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+      <link href={googleFontUrl} rel="stylesheet" />
 
       {/* Print styles */}
       <style>{`
@@ -115,7 +139,14 @@ export default function ProposalPage() {
 
       {/* ══════ HERO ══════ */}
       <section className="relative min-h-screen flex flex-col justify-center px-6 md:px-16 lg:px-24 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#080810] via-[#0d0d1a] to-[#121225]" />
+        <div
+          className="absolute inset-0"
+          style={{
+            background: hasBrand
+              ? `linear-gradient(135deg, ${clientPrimary}, ${clientPrimary}dd, #080810)`
+              : "linear-gradient(135deg, #080810, #0d0d1a, #121225)",
+          }}
+        />
         <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-[#d4a843]/5 rounded-full blur-[150px]" />
 
         <div className="relative z-10 max-w-6xl mx-auto w-full">
@@ -127,7 +158,7 @@ export default function ProposalPage() {
 
           <h1
             className="text-5xl md:text-7xl lg:text-8xl font-bold mb-6 leading-[1.05]"
-            style={{ fontFamily: "'Playfair Display', serif" }}
+            style={{ fontFamily: "var(--client-font)" }}
           >
             {proposal.client_name}
           </h1>
@@ -144,7 +175,7 @@ export default function ProposalPage() {
               { num: "30с", label: "середній час збірки" },
             ].map((s) => (
               <div key={s.label}>
-                <div className="text-4xl md:text-5xl font-bold text-[#d4a843]" style={{ fontFamily: "'Playfair Display', serif" }}>
+                <div className="text-4xl md:text-5xl font-bold text-[#d4a843]" style={{ fontFamily: "var(--client-font)" }}>
                   {s.num}
                 </div>
                 <div className="text-xs text-[#6e6a64] mt-2 uppercase tracking-wider" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
@@ -165,7 +196,7 @@ export default function ProposalPage() {
         <section className="py-24 px-6 md:px-16 lg:px-24 print-break">
           <div className="max-w-6xl mx-auto">
             <SectionLabel text="Ваш бізнес" />
-            <h2 className="text-3xl md:text-4xl font-bold mb-12" style={{ fontFamily: "'Playfair Display', serif" }}>
+            <h2 className="text-3xl md:text-4xl font-bold mb-12" style={{ fontFamily: "var(--client-font)" }}>
               Ми розуміємо вашу специфіку
             </h2>
             <div className="grid md:grid-cols-2 gap-6">
@@ -197,7 +228,7 @@ export default function ProposalPage() {
         <section className="py-24 px-6 md:px-16 lg:px-24 bg-[#0a0a14] print-break">
           <div className="max-w-6xl mx-auto">
             <SectionLabel text="Що болить" />
-            <h2 className="text-3xl md:text-4xl font-bold mb-12" style={{ fontFamily: "'Playfair Display', serif" }}>
+            <h2 className="text-3xl md:text-4xl font-bold mb-12" style={{ fontFamily: "var(--client-font)" }}>
               Де втрачається ефективність
             </h2>
             <div className="space-y-8">
@@ -208,7 +239,7 @@ export default function ProposalPage() {
                   <div key={i} className="flex gap-6 md:gap-10 items-start">
                     <div
                       className="text-5xl md:text-6xl font-bold text-[#d4a843]/20 flex-shrink-0 w-20 text-right"
-                      style={{ fontFamily: "'Playfair Display', serif" }}
+                      style={{ fontFamily: "var(--client-font)" }}
                     >
                       {String(i + 1).padStart(2, "0")}
                     </div>
@@ -229,7 +260,7 @@ export default function ProposalPage() {
         <section className="py-24 px-6 md:px-16 lg:px-24 print-break">
           <div className="max-w-6xl mx-auto">
             <SectionLabel text="Чому MTP" />
-            <h2 className="text-3xl md:text-4xl font-bold mb-12" style={{ fontFamily: "'Playfair Display', serif" }}>
+            <h2 className="text-3xl md:text-4xl font-bold mb-12" style={{ fontFamily: "var(--client-font)" }}>
               Ключові переваги
             </h2>
             <div className="grid md:grid-cols-2 gap-6">
@@ -265,7 +296,7 @@ export default function ProposalPage() {
       <section className="py-24 px-6 md:px-16 lg:px-24 bg-[#0a0a14] print-break">
         <div className="max-w-6xl mx-auto">
           <SectionLabel text="Як це працює" />
-          <h2 className="text-3xl md:text-4xl font-bold mb-16" style={{ fontFamily: "'Playfair Display', serif" }}>
+          <h2 className="text-3xl md:text-4xl font-bold mb-16" style={{ fontFamily: "var(--client-font)" }}>
             Від заявки до першої відправки
           </h2>
           <div className="grid md:grid-cols-4 gap-8">
@@ -295,7 +326,7 @@ export default function ProposalPage() {
       <section className="py-24 px-6 md:px-16 lg:px-24 print-break">
         <div className="max-w-6xl mx-auto">
           <SectionLabel text="Тарифи" />
-          <h2 className="text-3xl md:text-4xl font-bold mb-12" style={{ fontFamily: "'Playfair Display', serif" }}>
+          <h2 className="text-3xl md:text-4xl font-bold mb-12" style={{ fontFamily: "var(--client-font)" }}>
             Прозоре ціноутворення
           </h2>
           <div className="grid lg:grid-cols-3 gap-8">
@@ -361,7 +392,7 @@ export default function ProposalPage() {
       <section className="py-24 px-6 md:px-16 lg:px-24 bg-[#0a0a14] print-break">
         <div className="max-w-6xl mx-auto text-center">
           <SectionLabel text="Нам довіряють" center />
-          <h2 className="text-3xl md:text-4xl font-bold mb-16" style={{ fontFamily: "'Playfair Display', serif" }}>
+          <h2 className="text-3xl md:text-4xl font-bold mb-16" style={{ fontFamily: "var(--client-font)" }}>
             Наші клієнти
           </h2>
           <div className="flex flex-wrap justify-center gap-12 md:gap-20 items-center">
@@ -369,7 +400,7 @@ export default function ProposalPage() {
               <div
                 key={name}
                 className="text-3xl md:text-4xl font-bold text-[#6e6a64]/40 hover:text-[#d4a843]/60 transition-colors"
-                style={{ fontFamily: "'Playfair Display', serif" }}
+                style={{ fontFamily: "var(--client-font)" }}
               >
                 {name}
               </div>
@@ -383,7 +414,7 @@ export default function ProposalPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-[#d4a843]/5 to-transparent" />
         <div className="relative max-w-4xl mx-auto text-center">
           <SectionLabel text="Наступний крок" center />
-          <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-8" style={{ fontFamily: "'Playfair Display', serif" }}>
+          <h2 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-8" style={{ fontFamily: "var(--client-font)" }}>
             Готові масштабуватись?
           </h2>
           <p className="text-xl text-[#6e6a64] mb-12 max-w-2xl mx-auto">

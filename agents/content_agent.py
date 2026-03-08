@@ -59,7 +59,7 @@ class ContentAgent:
     def __init__(self):
         pass
 
-    def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str, tariffs=None) -> Dict[str, str]:
+    def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str, tariffs=None, brand_style: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """Генерує HTML, PPTX та email.txt. Повертає шляхи до файлів."""
         os.makedirs(output_dir, exist_ok=True)
 
@@ -87,7 +87,7 @@ class ContentAgent:
         # Web proposal via proposals API
         web_proposal = None
         try:
-            web_proposal = self.create_web_proposal(lead, analysis)
+            web_proposal = self.create_web_proposal(lead, analysis, brand_style=brand_style)
         except Exception as e:
             logger.error(f"Web proposal creation failed: {e}", exc_info=True)
 
@@ -97,7 +97,7 @@ class ContentAgent:
             result["web_proposal"] = web_proposal
         return result
 
-    def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any], brand_style: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
         """Create a web proposal via proposals API.
 
         Returns {'slug': ..., 'url': ..., 'proposal_id': ...} or None on error.
@@ -129,6 +129,7 @@ class ContentAgent:
                 "mtp_fit": analysis.get("mtp_fit", ""),
                 "score": analysis.get("score"),
                 "grade": analysis.get("grade", ""),
+                "brand_style": brand_style or {},
             },
             "pricing_data": {
                 "storage": "650 грн / м³ / міс",

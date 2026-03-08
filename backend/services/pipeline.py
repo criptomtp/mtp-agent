@@ -90,9 +90,21 @@ async def run_pipeline(niche: str, count: int) -> dict:
         )
         os.makedirs(results_dir, exist_ok=True)
 
+        from agents.style_agent import StyleAgent
+        style_agent = StyleAgent()
+
         for i, lead in enumerate(leads):
             lead_name = lead.name
             progress = f"[{i+1}/{len(leads)}]"
+
+            # 1.5. Style extraction
+            brand_style = {}
+            if lead.website:
+                try:
+                    await _log(run_id, f"{progress} 🎨 Extracting brand style: {lead.website}")
+                    brand_style = style_agent.extract(lead.website)
+                except Exception as e:
+                    logger.warning(f"StyleAgent failed for {lead_name}: {e}")
 
             # 2. Analysis
             await _agent_progress(run_id, 2, "Analysis", "running", f"{progress} Аналіз: {lead_name}")
@@ -110,7 +122,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             lead_dir = os.path.join(results_dir, f"{i+1:02d}_{safe_name}")
             os.makedirs(lead_dir, exist_ok=True)
 
-            files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs)
+            files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs, brand_style=brand_style)
             html_path = files.get("html", "")
             email_path = files.get("email", "")
             pptx_path = files.get("pptx", "")
