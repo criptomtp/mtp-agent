@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 from backend.config import settings
-from backend.routers import dashboard, leads, runs, settings as settings_router
+from backend.routers import dashboard, leads, proposals, runs, settings as settings_router
 from backend.ws.logs import log_manager
 
 app = FastAPI(title="MTP Fulfillment Dashboard API")
@@ -22,6 +22,7 @@ app.add_middleware(
 app.include_router(dashboard.router)
 app.include_router(leads.router)
 app.include_router(runs.router)
+app.include_router(proposals.router)
 app.include_router(settings_router.router)
 
 

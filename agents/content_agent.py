@@ -103,7 +103,7 @@ class ContentAgent:
         Returns {'slug': ..., 'url': ..., 'proposal_id': ...} or None on error.
         """
         api_secret = os.getenv("MTP_CABINET_API_SECRET", "dev-secret")
-        api_url = "https://mtp-cabinet.vercel.app/api/proposals/create"
+        api_url = os.getenv("MTP_API_URL", "https://mtp-agent-production.up.railway.app") + "/api/proposals/create"
 
         pain_points_text = ""
         for p in analysis.get("pain_points", []):
