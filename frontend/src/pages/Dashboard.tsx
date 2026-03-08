@@ -1,13 +1,22 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import StatCard from "../components/StatCard";
-import RunLog from "../components/RunLog";
+import RunLog, { type AgentMap } from "../components/RunLog";
+import AgentCards from "../components/AgentCards";
+
+const INITIAL_AGENTS: AgentMap = {
+  1: { name: "Research", status: "waiting", detail: "" },
+  2: { name: "Analysis", status: "waiting", detail: "" },
+  3: { name: "Content", status: "waiting", detail: "" },
+  4: { name: "Outreach", status: "waiting", detail: "" },
+};
 
 export default function Dashboard() {
   const [stats, setStats] = useState({ total_runs: 0, total_leads: 0, active_runs: 0 });
   const [niche, setNiche] = useState("cosmetics");
   const [count, setCount] = useState(5);
   const [running, setRunning] = useState(false);
+  const [agents, setAgents] = useState<AgentMap>(INITIAL_AGENTS);
 
   useEffect(() => {
     api.getStats().then(setStats).catch(() => {});
@@ -15,12 +24,17 @@ export default function Dashboard() {
 
   const handleRun = async () => {
     setRunning(true);
+    setAgents(INITIAL_AGENTS);
     try {
       await api.runAgents(niche, count);
     } catch (err) {
       console.error(err);
     }
   };
+
+  const handleAgentUpdate = useCallback((updated: AgentMap) => {
+    setAgents(updated);
+  }, []);
 
   return (
     <div>
@@ -68,9 +82,11 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <AgentCards agents={agents} />
+
       <div>
         <h3 className="font-semibold text-gray-800 mb-3">Live Logs</h3>
-        <RunLog />
+        <RunLog onAgentUpdate={handleAgentUpdate} />
       </div>
     </div>
   );

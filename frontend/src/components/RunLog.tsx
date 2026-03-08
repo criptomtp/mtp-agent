@@ -1,9 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 
-export default function RunLog() {
+interface AgentStatus {
+  name: string;
+  status: "waiting" | "running" | "done" | "error";
+  detail: string;
+}
+
+export type AgentMap = Record<number, AgentStatus>;
+
+interface RunLogProps {
+  onAgentUpdate?: (agents: AgentMap) => void;
+}
+
+export default function RunLog({ onAgentUpdate }: RunLogProps) {
   const [logs, setLogs] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const agentsRef = useRef<AgentMap>({
+    1: { name: "Research", status: "waiting", detail: "" },
+    2: { name: "Analysis", status: "waiting", detail: "" },
+    3: { name: "Content", status: "waiting", detail: "" },
+    4: { name: "Outreach", status: "waiting", detail: "" },
+  });
 
   useEffect(() => {
     const wsUrl =
@@ -17,14 +35,27 @@ export default function RunLog() {
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        setLogs((prev) => [...prev, data.msg]);
+        if (data.type === "agent_progress") {
+          agentsRef.current = {
+            ...agentsRef.current,
+            [data.agent]: {
+              name: data.name,
+              status: data.status,
+              detail: data.detail || "",
+            },
+          };
+          onAgentUpdate?.({ ...agentsRef.current });
+        }
+        if (data.msg) {
+          setLogs((prev) => [...prev, data.msg]);
+        }
       } catch {
         setLogs((prev) => [...prev, e.data]);
       }
     };
 
     return () => ws.close();
-  }, []);
+  }, [onAgentUpdate]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

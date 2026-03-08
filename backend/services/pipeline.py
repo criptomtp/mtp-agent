@@ -22,6 +22,19 @@ async def _log(run_id: str, message: str):
     await log_manager.broadcast(line)
 
 
+async def _agent_progress(run_id: str, agent: int, name: str, status: str, detail: str = ""):
+    """Broadcast structured agent progress event."""
+    event = json.dumps({
+        "run_id": run_id,
+        "type": "agent_progress",
+        "agent": agent,
+        "name": name,
+        "status": status,
+        "detail": detail,
+    })
+    await log_manager.broadcast(event)
+
+
 async def run_pipeline(niche: str, count: int) -> dict:
     db = get_supabase()
 
@@ -64,9 +77,11 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
         orchestrator = Orchestrator(send_email=False, api_keys=api_keys, tariffs=tariffs)
 
-        # 1. Research — method is .search(count)
-        await _log(run_id, "Researching leads...")
+        # 1. Research
+        await _agent_progress(run_id, 1, "Research", "running", "Пошук лідів...")
+        await _log(run_id, "🔍 Researching leads...")
         leads = orchestrator.research.search(count)
+        await _agent_progress(run_id, 1, "Research", "done", f"Знайдено {len(leads)} лідів")
         await _log(run_id, f"Found {len(leads)} leads")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
@@ -77,25 +92,36 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
         for i, lead in enumerate(leads):
             lead_name = lead.name
-            await _log(run_id, f"[{i+1}/{len(leads)}] Analyzing: {lead_name}")
+            progress = f"[{i+1}/{len(leads)}]"
 
-            # 2. Analysis — .analyze(lead, tariffs) returns dict
+            # 2. Analysis
+            await _agent_progress(run_id, 2, "Analysis", "running", f"{progress} Аналіз: {lead_name}")
+            await _log(run_id, f"{progress} 🧠 Analyzing: {lead_name}")
             analysis = orchestrator.analysis.analyze(lead, tariffs=tariffs)
+            score = analysis.get("score", 0) if isinstance(analysis, dict) else 0
+            grade = analysis.get("grade", "?") if isinstance(analysis, dict) else "?"
+            await _agent_progress(run_id, 2, "Analysis", "done", f"{progress} {lead_name}: {grade} ({score}/10)")
+            await _log(run_id, f"{progress} Analysis done: {lead_name} — {grade} ({score}/10)")
 
-            await _log(run_id, f"[{i+1}/{len(leads)}] Generating content: {lead_name}")
+            # 3. Content
+            await _agent_progress(run_id, 3, "Content", "running", f"{progress} Генерація КП: {lead_name}")
+            await _log(run_id, f"{progress} ✍️ Generating content: {lead_name}")
             safe_name = re.sub(r"[^\w\s-]", "", lead_name).strip().replace(" ", "_")[:50]
             lead_dir = os.path.join(results_dir, f"{i+1:02d}_{safe_name}")
             os.makedirs(lead_dir, exist_ok=True)
 
-            # 3. Content — .generate(lead, analysis, dir, tariffs) returns {'html': path, 'email': path, 'pptx': path}
             files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs)
             html_path = files.get("html", "")
             email_path = files.get("email", "")
             pptx_path = files.get("pptx", "")
+            web_url_detail = f" + web" if files.get("web_url") else ""
+            await _agent_progress(run_id, 3, "Content", "done", f"{progress} {lead_name}: HTML + PPTX + email{web_url_detail}")
 
-            # 4. Outreach — .process(lead, dir, send_email) returns status string
-            await _log(run_id, f"[{i+1}/{len(leads)}] Processing outreach: {lead_name}")
+            # 4. Outreach
+            await _agent_progress(run_id, 4, "Outreach", "running", f"{progress} Підготовка розсилки: {lead_name}")
+            await _log(run_id, f"{progress} 📧 Processing outreach: {lead_name}")
             outreach_status = orchestrator.outreach.process(lead, lead_dir, False)
+            await _agent_progress(run_id, 4, "Outreach", "done", f"{progress} {lead_name}: {outreach_status}")
 
             # Save lead to DB
             web_url = files.get("web_url", "")
@@ -186,7 +212,10 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
     except Exception as e:
         logger.exception(f"Pipeline failed for run {run_id}")
-        await _log(run_id, f"Error: {str(e)}")
+        await _log(run_id, f"❌ Error: {str(e)}")
+        # Mark all agents as error
+        for ag, name in [(1, "Research"), (2, "Analysis"), (3, "Content"), (4, "Outreach")]:
+            await _agent_progress(run_id, ag, name, "error", str(e)[:100])
         db.table("runs").update(
             {
                 "status": "failed",
