@@ -98,6 +98,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             outreach_status = orchestrator.outreach.process(lead, lead_dir, False)
 
             # Save lead to DB
+            web_url = files.get("web_url", "")
             lead_record = (
                 db.table("leads")
                 .insert(
@@ -114,6 +115,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
                         "outreach_status": outreach_status,
                         "score": analysis.get("score", 0) if isinstance(analysis, dict) else 0,
                         "score_grade": analysis.get("grade", "D") if isinstance(analysis, dict) else "D",
+                        "proposal_url": web_url,
                     }
                 )
                 .execute()

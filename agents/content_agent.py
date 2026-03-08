@@ -85,21 +85,25 @@ class ContentAgent:
         self._generate_email(lead, analysis, email_path)
 
         # Web proposal via mtp-cabinet API
-        web_url = None
+        web_proposal = None
         try:
-            web_url = self.create_web_proposal(lead, analysis)
+            web_proposal = self.create_web_proposal(lead, analysis)
         except Exception as e:
             logger.error(f"Web proposal creation failed: {e}", exc_info=True)
 
         result = {"html": html_path, "email": email_path, "pptx": pptx_path}
-        if web_url:
-            result["web_url"] = web_url
+        if web_proposal:
+            result["web_url"] = web_proposal["url"]
+            result["web_proposal"] = web_proposal
         return result
 
-    def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any]) -> Optional[str]:
-        """Create a web proposal via mtp-cabinet API. Returns proposal URL or None."""
+    def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Create a web proposal via mtp-cabinet API.
+
+        Returns {'slug': ..., 'url': ..., 'proposal_id': ...} or None on error.
+        """
         api_secret = os.getenv("MTP_CABINET_API_SECRET", "dev-secret")
-        url = "https://mtp-cabinet.vercel.app/api/proposals/create"
+        api_url = "https://mtp-cabinet.vercel.app/api/proposals/create"
 
         pain_points_text = ""
         for p in analysis.get("pain_points", []):
@@ -108,8 +112,6 @@ class ContentAgent:
             else:
                 pain_points_text += f"{p}; "
 
-        pricing_estimate = analysis.get("pricing_estimate", {})
-
         payload = {
             "client_name": lead.name,
             "client_data": {
@@ -117,7 +119,7 @@ class ContentAgent:
                 "client_insight": analysis.get("client_insight", ""),
                 "description": getattr(lead, "description", "") or "",
                 "blockers": pain_points_text.strip("; "),
-                "goal": "Запустити e-commerce",
+                "goal": getattr(lead, "goal", "") or "Запустити e-commerce",
                 "market": getattr(lead, "category", "") or "",
                 "city": getattr(lead, "city", "") or "",
                 "products_count": getattr(lead, "products_count", None),
@@ -129,16 +131,21 @@ class ContentAgent:
                 "grade": analysis.get("grade", ""),
             },
             "pricing_data": {
+                "storage": "650 грн / м³ / міс",
+                "receiving": "3 грн / одиниця",
+                "shipping": "22 грн / замовлення",
+                "estimate_range": "8 000 – 14 000 грн",
+                "estimate_note": "На 300-800 замовлень/міс",
                 "tariffs": [
                     {"name": name, "price": price}
                     for name, price in _build_tariffs_rows()
                 ],
-                "estimate": pricing_estimate if isinstance(pricing_estimate, dict) else {},
+                "estimate": analysis.get("pricing_estimate", {}) if isinstance(analysis.get("pricing_estimate"), dict) else {},
             },
         }
 
         resp = requests.post(
-            url,
+            api_url,
             json=payload,
             headers={
                 "Authorization": f"Bearer {api_secret}",
@@ -149,9 +156,8 @@ class ContentAgent:
 
         if resp.status_code == 200:
             data = resp.json()
-            web_url = data.get("url", "")
-            logger.info(f"Web proposal created: {web_url}")
-            return web_url
+            logger.info(f"Web proposal created: {data.get('url', '')}")
+            return {"slug": data.get("slug", ""), "url": data.get("url", ""), "proposal_id": data.get("proposal_id", "")}
         else:
             logger.error(f"Web proposal API error {resp.status_code}: {resp.text}")
             return None
