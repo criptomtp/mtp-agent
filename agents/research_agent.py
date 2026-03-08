@@ -60,7 +60,7 @@ class ResearchAgent:
     INSTAGRAM_GRAPH_URL = "https://graph.facebook.com/v19.0"
 
     # All available search channels
-    ALL_CHANNELS = ["google_maps", "google_search", "prom", "olx", "instagram", "facebook"]
+    ALL_CHANNELS = ["google_organic", "google_maps", "google_search", "prom", "olx", "instagram", "facebook"]
 
     def __init__(self, api_keys: Optional[dict] = None, channels: Optional[List[str]] = None):
         self._api_keys = api_keys or {}
@@ -212,6 +212,7 @@ class ResearchAgent:
         # Request 2x to account for dedup filtering
         remaining = lambda: max(0, count * 2 - len(leads))
         channel_methods = {
+            "google_organic": lambda: self._search_google_organic(remaining(), niche=niche),
             "prom": lambda: self._search_prom(remaining(), niche=niche),
             "google_maps": lambda: self._search_google_maps(remaining(), niche=niche),
             "google_search": lambda: self._search_google_custom(remaining(), niche=niche),
@@ -351,6 +352,76 @@ class ResearchAgent:
         except Exception as e:
             logger.warning(f"[Research] Дедуплікація не вдалась: {e}")
             return leads
+
+    # ── Google Organic Search ──────────────────────────────────────
+
+    SKIP_DOMAINS = {
+        "prom.ua", "rozetka.com.ua", "olx.ua", "facebook.com", "instagram.com",
+        "youtube.com", "tiktok.com", "wikipedia.org", "google.com", "google.com.ua",
+        "makeup.com.ua", "pinterest.com", "linkedin.com", "twitter.com",
+    }
+
+    def _search_google_organic(self, count: int, niche: str = "косметика") -> List[Lead]:
+        """Search Google organically via googlesearch-python."""
+        leads = []
+        queries = [
+            f"{niche} інтернет-магазин Україна",
+            f"{niche} оптом Україна купити",
+            f"{niche} виробник Україна сайт",
+        ]
+
+        try:
+            from googlesearch import search as gsearch
+        except ImportError:
+            logger.warning("[ResearchAgent] googlesearch-python not installed, skipping google_organic")
+            return []
+
+        for query in queries:
+            if len(leads) >= count:
+                break
+            try:
+                results = list(gsearch(query, num_results=10, lang="uk", sleep_interval=2))
+                for url in results:
+                    if len(leads) >= count:
+                        break
+
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    domain = parsed.netloc.replace("www.", "")
+
+                    # Skip aggregators
+                    if any(skip in domain for skip in self.SKIP_DOMAINS):
+                        continue
+
+                    # Extract company name from domain
+                    name = domain.split(".")[0]
+                    if len(name) < 3:
+                        continue
+                    name = clean_company_name(name.replace("-", " ").replace("_", " ").title())
+
+                    lead = Lead(
+                        name=name,
+                        website=url,
+                        description=f"Google: {query}",
+                        source="google_organic",
+                    )
+
+                    # Enrich from website
+                    self._scrape_contact_from_website(lead)
+                    if not lead.email and not lead.phone:
+                        lead.contact_source = "manual_needed"
+                    else:
+                        lead.contact_source = "website"
+
+                    leads.append(lead)
+
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] Google organic ({query}): {e}")
+                continue
+
+        return leads
+
+    # ── Prom.ua ────────────────────────────────────────────────────
 
     def _search_prom(self, count: int, niche: str = "косметика") -> List[Lead]:
         """Парсинг продавців з Prom.ua по ніші з enrichment."""
