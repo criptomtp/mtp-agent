@@ -145,9 +145,21 @@ class ContentAgent:
             f"Переваги MTP для клієнта: {', '.join(benefit_titles)}"
         )
 
-        # Build tariffs text
+        # Build tariffs text — show attractive pricing
         tariff_rows = _build_tariffs_rows(tariffs)
-        tariffs_text = ", ".join([f"{name}: {price}" for name, price in tariff_rows])
+        attractive_tariffs = []
+        for name, price in tariff_rows:
+            # Reformat for psychological attractiveness
+            lname = name.lower()
+            if "зберігання" in lname and "паллет" not in lname:
+                attractive_tariffs.append(f"{name}: від 325 грн / 0.5м³ / міс")
+            elif "комплектація" in lname or "відвантаження" in lname or "відправ" in lname:
+                attractive_tariffs.append(f"{name}: від 18 грн / замовлення")
+            elif "прийом" in lname or "приймання" in lname:
+                attractive_tariffs.append(f"{name}: від 1.5 грн / одиниця")
+            else:
+                attractive_tariffs.append(f"{name}: {price}")
+        tariffs_text = ", ".join(attractive_tariffs)
 
         # Brand style
         bs = brand_style or {}
@@ -200,10 +212,16 @@ MTP FULFILLMENT (продавець):
 - Hero секція ОБОВ'ЯЗКОВО має padding-top: мінімум 100px (щоб текст не ховався під sticky navbar)
 - Всі body секції мають padding-top достатній щоб не перекриватись navbar
 - Клієнти KRKR/ORNER/ELEMIS — клікабельні: <a href="https://krkr.com.ua" target="_blank">KRKR</a>, <a href="https://orner.com.ua" target="_blank">ORNER</a>, <a href="https://elemis.com.ua" target="_blank">ELEMIS</a>
-- Footer — всі контакти клікабельні: <a href="mailto:mtpgrouppromo@gmail.com">, <a href="tel:+380501444645">, <a href="https://fulfillmentmtp.com.ua" target="_blank">
+- Footer — всі контакти клікабельні: <a href="mailto:mtpgrouppromo@gmail.com">, <a href="tel:+380501444645">, <a href="https://fulfillmentmtp.com.ua" target="_blank">. Копірайт: © 2026 MTP Fulfillment
 - Перевір: весь текст читабельний, немає overflow, кнопки не перекривають текст, контраст достатній
 
-ВАЖЛИВО: Поверни ТІЛЬКИ валідний HTML від <!DOCTYPE html> до </html>. Без markdown, без пояснень."""
+КРИТИЧНО ЩОДО КОЛЬОРІВ:
+- Використовуй {brand_primary} як ОСНОВНИЙ колір фону hero, navbar, заголовків, кнопок
+- НЕ використовуй #1A365D якщо він не є реальним brand_primary клієнта
+- Якщо brand_primary = #1A365D — це дефолтний колір, використай нейтральний темний корпоративний стиль (#1a1a2e або #0f172a)
+- MTP червоний #E53E3E — ТІЛЬКИ для CTA кнопок і акцентів, НЕ для основного фону
+
+ВАЖЛИВО: Поверни ТІЛЬКИ валідний HTML від <!DOCTYPE html> до </html>. Без markdown, без пояснень. Рік у копірайті — 2026."""
 
         try:
             import google.generativeai as genai

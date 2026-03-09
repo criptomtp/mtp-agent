@@ -102,6 +102,10 @@ async def run_pipeline(niche: str, count: int) -> dict:
             try:
                 await _log(run_id, f"{progress} 🎨 Extracting brand style: {lead.website or lead_name}")
                 brand_style = style_agent.extract(lead.website, lead_name=lead_name)
+                primary = brand_style.get("primary_color", "")
+                await _log(run_id, f"{progress} StyleAgent: website={lead.website}, primary={primary}, font={brand_style.get('font_family', '')}")
+                if primary == "#1A365D":
+                    await _log(run_id, f"{progress} ⚠️ WARNING: using default colors for {lead_name}, no website found")
             except Exception as e:
                 logger.warning(f"StyleAgent failed for {lead_name}: {e}")
 
