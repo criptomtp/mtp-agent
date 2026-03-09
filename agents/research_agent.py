@@ -193,11 +193,25 @@ class ResearchAgent:
         active_channels = channels or self._channels
         leads: List[Lead] = []
         seen_names: set = set()
+        seen_domains: set = set()
 
         def _add_lead(lead: Lead) -> bool:
             norm = _normalize_name(lead.name)
             if norm in seen_names or len(norm) < 3:
                 return False
+            # Domain dedup within run
+            if lead.website:
+                domain = ResearchAgent._extract_domain(lead.website)
+                if domain and domain in seen_domains:
+                    logger.debug(f"[Research] Пропускаємо дублікат домену в рамках run: {lead.name} ({domain})")
+                    return False
+                if domain:
+                    seen_domains.add(domain)
+            # Fuzzy name dedup within run
+            for existing_name in seen_names:
+                if ResearchAgent._name_similarity(norm, existing_name) > 0.80:
+                    logger.debug(f"[Research] Пропускаємо схоже ім'я в рамках run: {lead.name} ~= {existing_name}")
+                    return False
             seen_names.add(norm)
             leads.append(lead)
             return True
@@ -322,29 +336,79 @@ class ResearchAgent:
             logger.warning(f"[ResearchAgent] Gemini lead generation failed: {e}")
             return []
 
+    @staticmethod
+    def _extract_domain(url: str) -> str:
+        """Extract clean domain from URL for dedup (e.g. 'example.com.ua')."""
+        from urllib.parse import urlparse
+        try:
+            domain = urlparse(url).netloc.lower().replace("www.", "")
+            return domain if domain else ""
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _name_similarity(a: str, b: str) -> float:
+        """Simple character-level similarity ratio (0..1) between two normalized names."""
+        if not a or not b:
+            return 0.0
+        a, b = _normalize_name(a), _normalize_name(b)
+        if a == b:
+            return 1.0
+        # Use longest common subsequence ratio
+        shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+        if len(longer) == 0:
+            return 1.0
+        matches = sum(1 for c in shorter if c in longer)
+        # Simple overlap ratio
+        overlap = 2 * matches / (len(a) + len(b))
+        # Also check substring containment
+        if shorter in longer:
+            return max(overlap, 0.85)
+        return overlap
+
     def _filter_already_contacted(self, leads: List[Lead]) -> List[Lead]:
-        """Filter out leads that already exist in the DB (by website, phone, or email)."""
+        """Filter out leads that already exist in the DB (by website domain, phone, email, or fuzzy name)."""
         try:
             from backend.services.database import get_supabase
             db = get_supabase()
-            existing = db.table("leads").select("website,phone,email").execute()
+            existing = db.table("leads").select("name,website,phone,email").execute()
             existing_websites = {r["website"] for r in existing.data if r.get("website")}
+            existing_domains = {self._extract_domain(r["website"]) for r in existing.data if r.get("website")}
+            existing_domains.discard("")
             existing_phones = {r["phone"] for r in existing.data if r.get("phone")}
             existing_emails = {r["email"] for r in existing.data if r.get("email")}
+            existing_names = [_normalize_name(r["name"]) for r in existing.data if r.get("name")]
 
             filtered = []
             for lead in leads:
                 is_duplicate = False
+                reason = ""
+
+                # 1. Exact website match
                 if lead.website and lead.website in existing_websites:
-                    logger.info(f"[Research] Пропускаємо дублікат (website): {lead.name}")
-                    is_duplicate = True
-                elif lead.phone and lead.phone in existing_phones:
-                    logger.info(f"[Research] Пропускаємо дублікат (phone): {lead.name}")
-                    is_duplicate = True
-                elif lead.email and lead.email in existing_emails:
-                    logger.info(f"[Research] Пропускаємо дублікат (email): {lead.name}")
-                    is_duplicate = True
-                if not is_duplicate:
+                    is_duplicate, reason = True, "website exact"
+                # 2. Domain match
+                elif lead.website:
+                    domain = self._extract_domain(lead.website)
+                    if domain and domain in existing_domains:
+                        is_duplicate, reason = True, f"domain {domain}"
+                # 3. Phone match
+                if not is_duplicate and lead.phone and lead.phone in existing_phones:
+                    is_duplicate, reason = True, "phone"
+                # 4. Email match
+                if not is_duplicate and lead.email and lead.email in existing_emails:
+                    is_duplicate, reason = True, "email"
+                # 5. Fuzzy name match (>80% similarity)
+                if not is_duplicate and lead.name:
+                    norm = _normalize_name(lead.name)
+                    for ex_name in existing_names:
+                        if self._name_similarity(norm, ex_name) > 0.80:
+                            is_duplicate, reason = True, f"name ~'{ex_name}'"
+                            break
+
+                if is_duplicate:
+                    logger.info(f"[Research] Пропускаємо дублікат ({reason}): {lead.name}")
+                else:
                     filtered.append(lead)
 
             logger.info(f"[Research] Після дедуплікації: {len(filtered)}/{len(leads)} нових лідів")

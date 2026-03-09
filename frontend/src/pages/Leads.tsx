@@ -105,7 +105,7 @@ export default function Leads() {
   const proposalUrl = selected
     ? (selected.proposal_url || (htmlFile ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal` : null))
     : null;
-  const pptxUrl = selected && pptxFile
+  const pptxUrl = selected && pptxFile && pptxFile.file_url
     ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal.pptx`
     : null;
   const emailText = emailFile?.content_text || "";

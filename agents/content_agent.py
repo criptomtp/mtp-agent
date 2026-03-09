@@ -145,21 +145,7 @@ class ContentAgent:
             f"Переваги MTP для клієнта: {', '.join(benefit_titles)}"
         )
 
-        # Build tariffs text — show attractive pricing
-        tariff_rows = _build_tariffs_rows(tariffs)
-        attractive_tariffs = []
-        for name, price in tariff_rows:
-            # Reformat for psychological attractiveness
-            lname = name.lower()
-            if "зберігання" in lname and "паллет" not in lname:
-                attractive_tariffs.append(f"{name}: від 325 грн / 0.5м³ / міс")
-            elif "комплектація" in lname or "відвантаження" in lname or "відправ" in lname:
-                attractive_tariffs.append(f"{name}: від 18 грн / замовлення")
-            elif "прийом" in lname or "приймання" in lname:
-                attractive_tariffs.append(f"{name}: від 1.5 грн / одиниця")
-            else:
-                attractive_tariffs.append(f"{name}: {price}")
-        tariffs_text = ", ".join(attractive_tariffs)
+        from .knowledge_base import MTP_COMPANY, MTP_CLIENTS, MTP_TARIFFS, get_tariffs_prompt_text, get_clients_text
 
         # Brand style
         bs = brand_style or {}
@@ -170,12 +156,15 @@ class ContentAgent:
         # Generate slug
         slug = hashlib.md5(f"{lead.name}-{datetime.now().isoformat()}".encode()).hexdigest()[:12]
 
-        calendly_url = "https://calendly.com/mtpfulfillment/30min"
         client_name = lead.name
         website = getattr(lead, "website", "") or ""
         city = getattr(lead, "city", "") or ""
         niche_text = niche or "e-commerce"
         api_base = os.getenv("MTP_API_URL", "https://mtp-agent-production.up.railway.app")
+        calendly_url = MTP_COMPANY["calendly"]
+        tariffs_prompt = get_tariffs_prompt_text()
+        clients_text = get_clients_text()
+        clients_links = " ".join([f'<a href="{c["url"]}" target="_blank">{c["name"]}</a>' for c in MTP_CLIENTS])
 
         prompt = f"""Ти — топовий UX/UI дизайнер і копірайтер. Створи повну HTML-сторінку комерційної пропозиції від MTP Fulfillment для клієнта.
 
@@ -188,13 +177,14 @@ class ContentAgent:
 - Фірмовий стиль клієнта: primary={brand_primary}, secondary={brand_secondary}, font={brand_font}
 
 MTP FULFILLMENT (продавець):
-- Компанія: MTP Group Fulfillment, Бориспіль (біля Київ)
+- Компанія: {MTP_COMPANY['name']}, {MTP_COMPANY['location']}
 - Колір бренду: #E53E3E (червоний), білий
-- 7+ років на ринку, 60K+ відправок/міс, 2 склади
-- Тарифи: {tariffs_text}
-- Контакти: mtpgrouppromo@gmail.com, +38 (050) 144-46-45, fulfillmentmtp.com.ua
+- {MTP_COMPANY['years']} років на ринку, {MTP_COMPANY['shipments_per_month']} відправок/міс, {MTP_COMPANY['warehouses']} склади
+- Контакти: {MTP_COMPANY['email']}, {MTP_COMPANY['phone']}, {MTP_COMPANY['website']}
 - Calendly: {calendly_url}
-- Клієнти-референси: KRKR (krkr.com.ua), ORNER (orner.com.ua), ELEMIS (elemis.com.ua)
+- Клієнти-референси: {clients_text}
+
+{tariffs_prompt}
 
 ЗАВДАННЯ:
 Створи УНІКАЛЬНУ HTML сторінку яка:
@@ -202,17 +192,17 @@ MTP FULFILLMENT (продавець):
 2. Додає MTP червоний (#E53E3E) як акцентний колір на CTA кнопках і важливих елементах
 3. Має УНІКАЛЬНУ структуру і layout — НЕ стандартний шаблон. Придумай щось оригінальне для цього клієнта
 4. Пише УНІКАЛЬНИЙ текст під цю нішу і цього клієнта — не загальні фрази
-5. Включає секції (але в унікальному порядку і стилі): hero з назвою клієнта, болі бізнесу, рішення від MTP, тарифи, соціальний доказ (KRKR/ORNER/ELEMIS), CTA
+5. Включає секції (але в унікальному порядку і стилі): hero з назвою клієнта, болі бізнесу, рішення від MTP, тарифи (ТОЧНО за структурою вище), соціальний доказ ({clients_links}), CTA
 6. Адаптивна (mobile-friendly)
 7. Без зовнішніх залежностей (тільки Google Fonts дозволені)
 8. Tracking: при завантаженні fetch('{api_base}/api/proposals/track', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{slug:'{slug}', event:'open'}})}})\
 
 ОБОВ'ЯЗКОВІ ВИМОГИ ДО ВЕРСТКИ:
-- Sticky navbar (position:fixed, top:0, z-index:100, height ~60-70px) з: логотип "MTP Fulfillment" → <a href="https://fulfillmentmtp.com.ua" target="_blank">, телефон → <a href="tel:+380501444645">+38 (050) 144-46-45</a>, кнопка "Записатись" → <a href="{calendly_url}" target="_blank">
+- Sticky navbar (position:fixed, top:0, z-index:100, height ~60-70px) з: логотип "MTP Fulfillment" → <a href="{MTP_COMPANY['website']}" target="_blank">, телефон → <a href="tel:{MTP_COMPANY['phone_raw']}">{MTP_COMPANY['phone']}</a>, кнопка "Записатись" → <a href="{calendly_url}" target="_blank">
 - Hero секція ОБОВ'ЯЗКОВО має padding-top: мінімум 100px (щоб текст не ховався під sticky navbar)
 - Всі body секції мають padding-top достатній щоб не перекриватись navbar
-- Клієнти KRKR/ORNER/ELEMIS — клікабельні: <a href="https://krkr.com.ua" target="_blank">KRKR</a>, <a href="https://orner.com.ua" target="_blank">ORNER</a>, <a href="https://elemis.com.ua" target="_blank">ELEMIS</a>
-- Footer — всі контакти клікабельні: <a href="mailto:mtpgrouppromo@gmail.com">, <a href="tel:+380501444645">, <a href="https://fulfillmentmtp.com.ua" target="_blank">. Копірайт: © 2026 MTP Fulfillment
+- Клієнти-референси — клікабельні: {clients_links}
+- Footer — всі контакти клікабельні: <a href="mailto:{MTP_COMPANY['email']}">, <a href="tel:{MTP_COMPANY['phone_raw']}">, <a href="{MTP_COMPANY['website']}" target="_blank">. Копірайт: © 2026 MTP Fulfillment
 - Перевір: весь текст читабельний, немає overflow, кнопки не перекривають текст, контраст достатній
 
 КРИТИЧНО ЩОДО КОЛЬОРІВ:
