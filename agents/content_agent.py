@@ -225,7 +225,7 @@ MTP FULFILLMENT (продавець):
 
         # Upload to Supabase Storage
         try:
-            from backend.services.database import get_supabase, upload_to_storage
+            from backend.services.database import get_supabase_admin, upload_to_storage
 
             storage_path = f"web/{slug}/index.html"
             storage_url = upload_to_storage("proposals", storage_path, html.encode("utf-8"),
@@ -236,10 +236,11 @@ MTP FULFILLMENT (продавець):
                 return None
 
             # Save proposal record to DB
-            db = get_supabase()
+            db = get_supabase_admin()
             proposal_data = {
                 "slug": slug,
                 "client_name": client_name,
+                "html_url": storage_url,
                 "client_data": {
                     "html_url": storage_url,
                     "niche": niche_text,
@@ -251,9 +252,22 @@ MTP FULFILLMENT (продавець):
                 },
             }
             try:
-                db.table("proposals").insert(proposal_data).execute()
+                result = db.table("proposals").insert(proposal_data).execute()
+                if result.data:
+                    logger.info(f"[ContentAgent] Proposal saved to DB: slug={slug}, id={result.data[0].get('id')}")
+                else:
+                    logger.error(f"[ContentAgent] Proposal insert returned no data for slug={slug}")
             except Exception as e:
-                logger.warning(f"[ContentAgent] Proposal insert failed: {e}")
+                logger.error(f"[ContentAgent] Proposal insert failed: {e}", exc_info=True)
+                # Verify if it somehow got saved
+                try:
+                    check = db.table("proposals").select("id").eq("slug", slug).execute()
+                    if check.data:
+                        logger.info(f"[ContentAgent] Proposal exists despite error: slug={slug}")
+                    else:
+                        logger.error(f"[ContentAgent] Proposal NOT in DB after insert: slug={slug}")
+                except Exception:
+                    pass
 
             logger.info(f"[ContentAgent] Web proposal uploaded: {storage_url}")
             return {"slug": slug, "url": storage_url, "proposal_id": slug}
@@ -269,7 +283,7 @@ MTP FULFILLMENT (продавець):
         import hashlib
 
         try:
-            from backend.services.database import get_supabase, upload_to_storage
+            from backend.services.database import get_supabase_admin, upload_to_storage
 
             html = self._generate_html_proposal(lead, analysis, tariffs)
             slug = hashlib.md5(f"{lead.name}-fallback-{datetime.now().isoformat()}".encode()).hexdigest()[:12]
@@ -280,15 +294,20 @@ MTP FULFILLMENT (продавець):
             if not storage_url:
                 return None
 
-            db = get_supabase()
+            db = get_supabase_admin()
             try:
-                db.table("proposals").insert({
+                result = db.table("proposals").insert({
                     "slug": slug,
                     "client_name": lead.name,
+                    "html_url": storage_url,
                     "client_data": {"html_url": storage_url},
                 }).execute()
+                if result.data:
+                    logger.info(f"[ContentAgent] Fallback proposal saved: slug={slug}, id={result.data[0].get('id')}")
+                else:
+                    logger.error(f"[ContentAgent] Fallback proposal insert returned no data: slug={slug}")
             except Exception as e:
-                logger.warning(f"[ContentAgent] Fallback proposal DB insert failed: {e}")
+                logger.error(f"[ContentAgent] Fallback proposal DB insert failed: {e}", exc_info=True)
 
             logger.info(f"[ContentAgent] Fallback proposal uploaded: {storage_url}")
             return {"slug": slug, "url": storage_url, "proposal_id": slug}
