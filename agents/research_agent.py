@@ -426,8 +426,9 @@ class ResearchAgent:
 
         api_key = self._api_keys.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY", "")
         if not api_key:
-            logger.info("[ResearchAgent] SERPER_API_KEY not set, skipping Serper search")
+            logger.warning("[ResearchAgent] SERPER_API_KEY not set — add it to Railway env vars. Skipping Serper.")
             return []
+        logger.info(f"[ResearchAgent] Using Serper API (key: {api_key[:8]}...)")
 
         leads = []
         seen_domains: set = set()
@@ -883,9 +884,10 @@ class ResearchAgent:
 
     def _extract_contacts_from_html(self, lead: Lead, html: str):
         """Extract email and phone from HTML text."""
+        soup = BeautifulSoup(html, "lxml")
+
         # Extract email from mailto: links
         if not lead.email:
-            soup = BeautifulSoup(html, "lxml")
             for mailto in soup.select("[href^='mailto:']"):
                 email = mailto["href"].replace("mailto:", "").split("?")[0].strip()
                 if "@" in email and not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
@@ -900,13 +902,25 @@ class ResearchAgent:
                     lead.email = email
                     break
 
-        # Phone patterns — broad matching for Ukrainian numbers
+        # Extract phone from tel: links first (most reliable)
+        if not lead.phone:
+            for tel in soup.select("[href^='tel:']"):
+                raw = tel["href"].replace("tel:", "").strip()
+                digits = re.sub(r"[^\d]", "", raw)
+                if digits.startswith("380") and len(digits) >= 12:
+                    lead.phone = f"+{digits[:12]}"
+                    break
+                elif digits.startswith("0") and len(digits) >= 10:
+                    lead.phone = f"+38{digits[:10]}"
+                    break
+
+        # Regex fallback for phone
         if not lead.phone:
             phone_patterns = [
-                r"\+?38\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # +38 (066) 123-45-67
-                r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",  # +380661234567
-                r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",  # 066-123-45-67
-                r"8\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # 8 (066) 123-45-67
+                r"\+?38\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
+                r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",
+                r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",
+                r"8\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
             ]
             for pattern in phone_patterns:
                 phones = re.findall(pattern, html)
@@ -920,6 +934,18 @@ class ResearchAgent:
                     elif digits.startswith("0") and len(digits) >= 10:
                         lead.phone = f"+38{digits[:10]}"
                     break
+
+        # Try to extract city from address/location elements
+        if not lead.city:
+            for sel in ["[class*='address']", "[class*='location']", "[class*='city']", "[itemprop='address']"]:
+                el = soup.select_one(sel)
+                if el:
+                    text = el.get_text(strip=True)[:100]
+                    # Look for Ukrainian city names
+                    cities = re.findall(r"(?:Київ|Харків|Одеса|Дніпро|Львів|Запоріжжя|Вінниця|Полтава|Чернігів|Суми|Рівне|Тернопіль|Житомир|Хмельницький|Черкаси|Кропивницький|Миколаїв|Херсон|Чернівці|Івано-Франківськ|Ужгород|Луцьк|Бориспіль)", text)
+                    if cities:
+                        lead.city = cities[0]
+                        break
 
     # ── Google Custom Search ─────────────────────────────────────────
 
