@@ -438,42 +438,35 @@ class ResearchAgent:
             try:
                 resp = requests.post(
                     "https://html.duckduckgo.com/html/",
-                    data={"q": query, "s": "0", "kl": "ua-uk"},
+                    data={"q": query, "s": "0"},
                     headers=self.HEADERS,
-                    timeout=10,
+                    timeout=15,
                 )
                 resp.raise_for_status()
                 soup = BeautifulSoup(resp.text, "html.parser")
 
-                for result in soup.select(".result__body"):
+                # Each result is a div.result containing a.result__a (title+link)
+                for result in soup.select(".result"):
                     if len(leads) >= count:
                         break
 
-                    title_el = result.select_one(".result__title a, .result__a")
-                    url_el = result.select_one(".result__url, .result__extras__url a")
+                    title_el = result.select_one("a.result__a")
                     snippet_el = result.select_one(".result__snippet")
 
                     if not title_el:
                         continue
 
-                    # Extract URL
-                    site_url = ""
-                    if url_el:
-                        site_url = url_el.get("href", "") or url_el.get_text(strip=True)
-                    if not site_url and title_el:
-                        site_url = title_el.get("href", "")
-
-                    # DuckDuckGo wraps URLs in redirect, extract actual URL
-                    if "duckduckgo.com" in site_url and "uddg=" in site_url:
+                    # URL is in the <a> href, wrapped in DDG redirect with uddg= param
+                    href = title_el.get("href", "")
+                    site_url = href
+                    if "uddg=" in href:
                         try:
-                            site_url = unquote(site_url.split("uddg=")[1].split("&")[0])
+                            site_url = unquote(href.split("uddg=")[1].split("&")[0])
                         except Exception:
                             pass
 
-                    if not site_url:
+                    if not site_url or not site_url.startswith("http"):
                         continue
-                    if not site_url.startswith("http"):
-                        site_url = "https://" + site_url.split(" ")[0].split("›")[0].strip()
 
                     try:
                         parsed = urlparse(site_url)
