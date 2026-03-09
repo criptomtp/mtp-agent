@@ -97,7 +97,7 @@ def create_proposal(body: CreateProposalIn, authorization: Optional[str] = Heade
 
 @router.get("/{slug}")
 def get_proposal(slug: str):
-    from fastapi.responses import RedirectResponse
+    from fastapi.responses import HTMLResponse
 
     db = get_supabase_admin()
     result = db.table("proposals").select("*").eq("slug", slug).execute()
@@ -107,15 +107,15 @@ def get_proposal(slug: str):
 
     proposal = result.data[0]
 
-    # If proposal has Gemini-generated HTML in Storage — redirect to it
-    html_url = proposal.get("html_url") or ""
-    # Also check inside client_data (used when html_url column doesn't exist)
-    if not html_url:
+    # If proposal has HTML content stored directly — serve it with proper encoding
+    html_content = proposal.get("html_content") or ""
+    if not html_content:
         cd = proposal.get("client_data")
         if isinstance(cd, dict):
-            html_url = cd.get("html_url", "")
-    if html_url:
-        return RedirectResponse(html_url, status_code=302)
+            html_content = cd.get("html_content", "")
+
+    if html_content:
+        return HTMLResponse(content=html_content, status_code=200)
 
     # Otherwise return JSON for React-rendered ProposalPage
     return proposal

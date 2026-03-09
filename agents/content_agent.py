@@ -223,26 +223,16 @@ MTP FULFILLMENT (продавець):
             logger.error(f"[ContentAgent] Gemini HTML generation failed: {e}", exc_info=True)
             return None
 
-        # Upload to Supabase Storage
+        # Save HTML directly to proposals table (Supabase Storage has encoding issues)
         try:
-            from backend.services.database import get_supabase_admin, upload_to_storage
+            from backend.services.database import get_supabase_admin
 
-            storage_path = f"web/{slug}/index.html"
-            storage_url = upload_to_storage("proposals", storage_path, html.encode("utf-8"),
-                                            content_type="text/html; charset=utf-8")
-
-            if not storage_url:
-                logger.error("[ContentAgent] Failed to upload HTML to Supabase Storage")
-                return None
-
-            # Save proposal record to DB
             db = get_supabase_admin()
             proposal_data = {
                 "slug": slug,
                 "client_name": client_name,
-                "html_url": storage_url,
+                "html_content": html,
                 "client_data": {
-                    "html_url": storage_url,
                     "niche": niche_text,
                     "website": website,
                     "city": city,
@@ -259,61 +249,65 @@ MTP FULFILLMENT (продавець):
                     logger.error(f"[ContentAgent] Proposal insert returned no data for slug={slug}")
             except Exception as e:
                 logger.error(f"[ContentAgent] Proposal insert failed: {e}", exc_info=True)
-                # Verify if it somehow got saved
+                # Retry without html_content if column doesn't exist yet
                 try:
-                    check = db.table("proposals").select("id").eq("slug", slug).execute()
-                    if check.data:
-                        logger.info(f"[ContentAgent] Proposal exists despite error: slug={slug}")
-                    else:
-                        logger.error(f"[ContentAgent] Proposal NOT in DB after insert: slug={slug}")
-                except Exception:
-                    pass
+                    proposal_data.pop("html_content", None)
+                    proposal_data["client_data"]["html_content"] = html
+                    db.table("proposals").insert(proposal_data).execute()
+                    logger.info(f"[ContentAgent] Proposal saved with html in client_data: slug={slug}")
+                except Exception as e2:
+                    logger.error(f"[ContentAgent] Proposal insert retry failed: {e2}", exc_info=True)
 
-            logger.info(f"[ContentAgent] Web proposal uploaded: {storage_url}")
-            return {"slug": slug, "url": storage_url, "proposal_id": slug}
+            proposal_url = f"{api_base}/api/proposals/{slug}"
+            logger.info(f"[ContentAgent] Web proposal ready: {proposal_url}")
+            return {"slug": slug, "url": proposal_url, "proposal_id": slug}
 
         except Exception as e:
-            logger.error(f"[ContentAgent] Supabase upload failed: {e}", exc_info=True)
+            logger.error(f"[ContentAgent] Proposal save failed: {e}", exc_info=True)
             return None
 
     def _create_web_proposal_fallback(self, lead: "Lead", analysis: Dict[str, Any],
                                       brand_style: Optional[Dict[str, str]] = None,
                                       tariffs=None) -> Optional[Dict[str, str]]:
-        """Fallback: upload template HTML to Supabase Storage if Gemini fails."""
+        """Fallback: save template HTML to proposals table if Gemini fails."""
         import hashlib
 
         try:
-            from backend.services.database import get_supabase_admin, upload_to_storage
+            from backend.services.database import get_supabase_admin
 
             html = self._generate_html_proposal(lead, analysis, tariffs)
             slug = hashlib.md5(f"{lead.name}-fallback-{datetime.now().isoformat()}".encode()).hexdigest()[:12]
-
-            storage_path = f"web/{slug}/index.html"
-            storage_url = upload_to_storage("proposals", storage_path, html.encode("utf-8"),
-                                            content_type="text/html; charset=utf-8")
-            if not storage_url:
-                return None
+            api_base = os.getenv("MTP_API_URL", "https://mtp-agent-production.up.railway.app")
 
             db = get_supabase_admin()
+            proposal_data = {
+                "slug": slug,
+                "client_name": lead.name,
+                "html_content": html,
+            }
             try:
-                result = db.table("proposals").insert({
-                    "slug": slug,
-                    "client_name": lead.name,
-                    "html_url": storage_url,
-                    "client_data": {"html_url": storage_url},
-                }).execute()
+                result = db.table("proposals").insert(proposal_data).execute()
                 if result.data:
-                    logger.info(f"[ContentAgent] Fallback proposal saved: slug={slug}, id={result.data[0].get('id')}")
-                else:
-                    logger.error(f"[ContentAgent] Fallback proposal insert returned no data: slug={slug}")
-            except Exception as e:
-                logger.error(f"[ContentAgent] Fallback proposal DB insert failed: {e}", exc_info=True)
+                    logger.info(f"[ContentAgent] Fallback proposal saved: slug={slug}")
+            except Exception:
+                # Retry with html in client_data if html_content column missing
+                try:
+                    db.table("proposals").insert({
+                        "slug": slug,
+                        "client_name": lead.name,
+                        "client_data": {"html_content": html},
+                    }).execute()
+                    logger.info(f"[ContentAgent] Fallback proposal saved in client_data: slug={slug}")
+                except Exception as e:
+                    logger.error(f"[ContentAgent] Fallback proposal insert failed: {e}", exc_info=True)
+                    return None
 
-            logger.info(f"[ContentAgent] Fallback proposal uploaded: {storage_url}")
-            return {"slug": slug, "url": storage_url, "proposal_id": slug}
+            proposal_url = f"{api_base}/api/proposals/{slug}"
+            logger.info(f"[ContentAgent] Fallback proposal ready: {proposal_url}")
+            return {"slug": slug, "url": proposal_url, "proposal_id": slug}
 
         except Exception as e:
-            logger.error(f"[ContentAgent] Fallback upload failed: {e}", exc_info=True)
+            logger.error(f"[ContentAgent] Fallback save failed: {e}", exc_info=True)
             return None
 
     # ── PPTX helpers ──
