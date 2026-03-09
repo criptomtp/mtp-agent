@@ -50,8 +50,8 @@ class StyleAgent:
             if lead_name:
                 url = self._find_website_via_google(lead_name)
             if not url:
-                logger.info(f"[StyleAgent] No website found for '{lead_name}', using defaults")
-                return {**DEFAULT_STYLE}
+                logger.info(f"[StyleAgent] No website found for '{lead_name}', generating unique color from name")
+                return self._generate_color_from_name(lead_name)
 
         try:
             resp = requests.get(url, headers=self.HEADERS, timeout=10, allow_redirects=True)
@@ -107,6 +107,27 @@ class StyleAgent:
         except Exception as e:
             logger.debug(f"[StyleAgent] Google search for '{name}' failed: {e}")
         return ""
+
+    def _generate_color_from_name(self, name: str) -> Dict[str, str]:
+        """Generate a unique corporate color based on company name hash."""
+        import hashlib
+        import colorsys
+        h = int(hashlib.md5(name.encode()).hexdigest()[:6], 16)
+        hue = (h % 360) / 360.0
+        # Dark saturated corporate color
+        r, g, b = colorsys.hls_to_rgb(hue, 0.35, 0.6)
+        primary = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+        # Complementary accent
+        r2, g2, b2 = colorsys.hls_to_rgb((hue + 0.5) % 1.0, 0.40, 0.5)
+        secondary = f"#{int(r2*255):02x}{int(g2*255):02x}{int(b2*255):02x}"
+        logger.info(f"[StyleAgent] Generated colors for '{name}': primary={primary}, secondary={secondary}")
+        return {
+            "primary_color": primary,
+            "secondary_color": secondary,
+            "font_family": "Inter",
+            "website": "",
+            "brand_name": name,
+        }
 
     def _extract_colors(self, soup: BeautifulSoup, html: str) -> list:
         """Extract most frequent non-generic colors from CSS."""
