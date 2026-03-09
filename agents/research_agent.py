@@ -856,52 +856,84 @@ class ResearchAgent:
         except Exception as e:
             logger.debug(f"[ResearchAgent] Google website search for '{lead.name}' failed: {e}")
 
+    # Emails to ignore
+    JUNK_EMAIL_DOMAINS = {"example.com", "wixpress.com", "sentry.io", "googleapis.com",
+                          "w3.org", "schema.org", "prom.ua", "google.com", "facebook.com"}
+
     def _scrape_contact_from_website(self, lead: Lead):
-        """Scrape email and phone from a company website."""
+        """Scrape email and phone from a company website + cooperation pages."""
+        from urllib.parse import urlparse
+
         try:
-            resp = requests.get(lead.website, headers=self.HEADERS, timeout=10)
-            resp.raise_for_status()
-            html = resp.text
+            base_url = lead.website.rstrip("/")
+            parsed_base = urlparse(base_url)
+            base_origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
 
-            # Extract email from mailto: links
-            if not lead.email:
-                soup = BeautifulSoup(html, "lxml")
-                mailto = soup.select_one("[href^='mailto:']")
-                if mailto:
-                    email = mailto["href"].replace("mailto:", "").split("?")[0].strip()
-                    if "@" in email:
-                        lead.email = email
+            # Pages to check — main page + cooperation/contact pages
+            pages_to_check = [base_url]
+            cooperation_paths = [
+                "/contacts", "/kontakty", "/контакти", "/contact",
+                "/cooperation", "/partners", "/b2b", "/wholesale",
+                "/співпраця", "/партнерам", "/оптом", "/about",
+            ]
+            for path in cooperation_paths:
+                pages_to_check.append(base_origin + path)
 
-            # Regex fallback for email
-            if not lead.email:
-                emails = re.findall(r"[\w.-]+@[\w.-]+\.\w+", html)
-                # Filter out common non-contact emails
-                for email in emails:
-                    if not any(x in email.lower() for x in ["example.com", "wixpress", "sentry", "googleapis"]):
-                        lead.email = email
-                        break
-
-            # Regex for UA phone if still missing
-            if not lead.phone:
-                # Match various formats: +380661234567, +38 (066) 123-45-67, 0661234567, etc.
-                phone_patterns = [
-                    r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",
-                    r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",
-                ]
-                for pattern in phone_patterns:
-                    phones = re.findall(pattern, html)
-                    if phones:
-                        # Normalize: strip everything except digits and leading +
-                        raw = phones[0]
-                        digits = re.sub(r"[^\d]", "", raw)
-                        if digits.startswith("380"):
-                            lead.phone = f"+{digits}"
-                        elif digits.startswith("0") and len(digits) == 10:
-                            lead.phone = f"+38{digits}"
-                        break
+            for page_url in pages_to_check:
+                if lead.email and lead.phone:
+                    break  # Already have both
+                try:
+                    resp = requests.get(page_url, headers=self.HEADERS, timeout=8,
+                                        allow_redirects=True)
+                    if resp.status_code != 200:
+                        continue
+                    html = resp.text
+                    self._extract_contacts_from_html(lead, html)
+                except Exception:
+                    continue
 
         except Exception as e:
             logger.debug(f"[ResearchAgent] Website scrape failed for {lead.name}: {e}")
+
+    def _extract_contacts_from_html(self, lead: Lead, html: str):
+        """Extract email and phone from HTML text."""
+        # Extract email from mailto: links
+        if not lead.email:
+            soup = BeautifulSoup(html, "lxml")
+            for mailto in soup.select("[href^='mailto:']"):
+                email = mailto["href"].replace("mailto:", "").split("?")[0].strip()
+                if "@" in email and not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
+                    lead.email = email
+                    break
+
+        # Regex fallback for email
+        if not lead.email:
+            emails = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.(?:ua|com|net|org|info)", html)
+            for email in emails:
+                if not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
+                    lead.email = email
+                    break
+
+        # Phone patterns — broad matching for Ukrainian numbers
+        if not lead.phone:
+            phone_patterns = [
+                r"\+?38\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # +38 (066) 123-45-67
+                r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",  # +380661234567
+                r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",  # 066-123-45-67
+                r"8\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # 8 (066) 123-45-67
+            ]
+            for pattern in phone_patterns:
+                phones = re.findall(pattern, html)
+                if phones:
+                    raw = phones[0]
+                    digits = re.sub(r"[^\d]", "", raw)
+                    if digits.startswith("380") and len(digits) >= 12:
+                        lead.phone = f"+{digits[:12]}"
+                    elif digits.startswith("80") and len(digits) >= 11:
+                        lead.phone = f"+3{digits[:11]}"
+                    elif digits.startswith("0") and len(digits) >= 10:
+                        lead.phone = f"+38{digits[:10]}"
+                    break
 
     # ── Google Custom Search ─────────────────────────────────────────
 

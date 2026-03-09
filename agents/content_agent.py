@@ -105,6 +105,24 @@ class ContentAgent:
             result["web_proposal"] = web_proposal
         return result
 
+    def _validate_html(self, html: str, brand_primary: str = "") -> tuple:
+        """Validate generated HTML for quality issues. Returns (is_valid, issues)."""
+        issues = []
+        if "viewport" not in html:
+            issues.append("Missing viewport meta tag")
+        # Check for fixed widths > 600px (exclude max-width and media queries)
+        fixed_widths = re.findall(r"(?<!max-)(?<!min-)width:\s*(\d+)px", html)
+        wide = [w for w in fixed_widths if int(w) > 600]
+        if wide:
+            issues.append(f"Fixed widths > 600px: {wide[:5]}")
+        if "@media" not in html:
+            issues.append("No media queries — not responsive")
+        if brand_primary and brand_primary.lower() not in html.lower():
+            issues.append(f"brand_primary {brand_primary} not found in HTML")
+        if "box-sizing" not in html:
+            issues.append("Missing box-sizing: border-box")
+        return len(issues) == 0, issues
+
     def create_web_proposal(self, lead: "Lead", analysis: Dict[str, Any],
                             brand_style: Optional[Dict[str, str]] = None,
                             tariffs=None, niche: str = "") -> Optional[Dict[str, str]]:
@@ -209,11 +227,25 @@ MTP FULFILLMENT (продавець):
 - Footer — всі контакти клікабельні: <a href="mailto:{MTP_COMPANY['email']}">, <a href="tel:{MTP_COMPANY['phone_raw']}">, <a href="{MTP_COMPANY['website']}" target="_blank">. Копірайт: © 2026 MTP Fulfillment
 - Перевір: весь текст читабельний, немає overflow, кнопки не перекривають текст, контраст достатній
 
-КРИТИЧНО ЩОДО КОЛЬОРІВ:
-- Використовуй {brand_primary} як ОСНОВНИЙ колір фону hero, navbar, заголовків, кнопок
-- НЕ використовуй #1A365D якщо він не є реальним brand_primary клієнта
-- Якщо brand_primary = #1A365D — це дефолтний колір, використай нейтральний темний корпоративний стиль (#1a1a2e або #0f172a)
-- MTP червоний #E53E3E — ТІЛЬКИ для CTA кнопок і акцентів, НЕ для основного фону
+АБСОЛЮТНА ВИМОГА ДО КОЛЬОРІВ (ПОРУШЕННЯ = БРАК):
+- CSS змінна --brand-primary ПОВИННА бути: {brand_primary}
+- Hero секція, navbar, всі заголовки h2 — фон або колір тексту {brand_primary}
+- НЕ ВИКОРИСТОВУЙ #1A365D, #1a1a2e, #2c3e50 або будь-який інший колір замість {brand_primary}
+- Якщо brand_primary = #1A365D — це дефолтний колір, використай нейтральний (#0f172a)
+- MTP червоний #E53E3E — ТІЛЬКИ для CTA кнопок та акцентів, НЕ для фону секцій
+- ЗАБОРОНЕНО: ігнорувати brand_primary або замінювати його на свій вибір
+- Перевір перед відповіддю: чи є {brand_primary} в CSS root і чи він реально використовується
+
+КРИТИЧНО — АДАПТИВНІСТЬ І ЧИТАБЕЛЬНІСТЬ:
+- * {{ box-sizing: border-box; }}
+- img {{ max-width: 100%; height: auto; }}
+- Кнопки: white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis
+- Navbar кнопки на мобільному: font-size: 14px; padding: 8px 16px
+- Таблиці тарифів: width: 100%; table-layout: fixed; word-wrap: break-word
+- Текст в картках: overflow: hidden; word-break: break-word
+- НЕ використовуй фіксовані ширини в px для кнопок і карток — тільки %, vw, max-width
+- Медіа запити ОБОВ'ЯЗКОВІ: @media (max-width: 768px) і @media (max-width: 480px)
+- Перевір: чи всі кнопки поміщаються на екрані 375px шириною?
 
 ВАЖЛИВО: Поверни ТІЛЬКИ валідний HTML від <!DOCTYPE html> до </html>. Без markdown, без пояснень. Рік у копірайті — 2026."""
 
@@ -239,6 +271,11 @@ MTP FULFILLMENT (продавець):
                     return None
 
             logger.info(f"[ContentAgent] Gemini generated {len(html)} bytes of unique HTML for {client_name}")
+
+            # Validate HTML quality
+            valid, issues = self._validate_html(html, brand_primary)
+            if not valid:
+                logger.warning(f"[ContentAgent] HTML issues for {client_name}: {'; '.join(issues)}")
 
         except Exception as e:
             logger.error(f"[ContentAgent] Gemini HTML generation failed: {e}", exc_info=True)
