@@ -59,8 +59,8 @@ class ResearchAgent:
     OLX_SEARCH_URL = "https://www.olx.ua/d/uk/q-{query}/"
     INSTAGRAM_GRAPH_URL = "https://graph.facebook.com/v19.0"
 
-    # All available search channels
-    ALL_CHANNELS = ["google", "prom", "google_maps", "google_search", "olx", "instagram", "facebook"]
+    # All available search channels — DuckDuckGo first (Google blocks scraping)
+    ALL_CHANNELS = ["duckduckgo", "google", "prom", "google_maps", "google_search", "olx", "instagram", "facebook"]
 
     def __init__(self, api_keys: Optional[dict] = None, channels: Optional[List[str]] = None):
         self._api_keys = api_keys or {}
@@ -226,6 +226,7 @@ class ResearchAgent:
         # Request 2x to account for dedup filtering
         remaining = lambda: max(0, count * 2 - len(leads))
         channel_methods = {
+            "duckduckgo": lambda: self._search_duckduckgo(remaining(), niche=niche),
             "google": lambda: self._search_google(remaining(), niche=niche),
             "prom": lambda: self._search_prom(remaining(), niche=niche),
             "google_maps": lambda: self._search_google_maps(remaining(), niche=niche),
@@ -416,6 +417,110 @@ class ResearchAgent:
         except Exception as e:
             logger.warning(f"[Research] Дедуплікація не вдалась: {e}")
             return leads
+
+    # ── DuckDuckGo HTML Search ─────────────────────────────────────
+
+    def _search_duckduckgo(self, count: int, niche: str = "косметика") -> List[Lead]:
+        """Search DuckDuckGo HTML version — more reliable than Google scraping."""
+        from urllib.parse import urlparse, unquote
+
+        leads = []
+        seen_domains: set = set()
+        queries = [
+            f"{niche} інтернет магазин Україна купити",
+            f"{niche} оптом Україна",
+            f"{niche} виробник Україна сайт",
+        ]
+
+        for query in queries:
+            if len(leads) >= count:
+                break
+            try:
+                resp = requests.post(
+                    "https://html.duckduckgo.com/html/",
+                    data={"q": query, "s": "0", "kl": "ua-uk"},
+                    headers=self.HEADERS,
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+
+                for result in soup.select(".result__body"):
+                    if len(leads) >= count:
+                        break
+
+                    title_el = result.select_one(".result__title a, .result__a")
+                    url_el = result.select_one(".result__url, .result__extras__url a")
+                    snippet_el = result.select_one(".result__snippet")
+
+                    if not title_el:
+                        continue
+
+                    # Extract URL
+                    site_url = ""
+                    if url_el:
+                        site_url = url_el.get("href", "") or url_el.get_text(strip=True)
+                    if not site_url and title_el:
+                        site_url = title_el.get("href", "")
+
+                    # DuckDuckGo wraps URLs in redirect, extract actual URL
+                    if "duckduckgo.com" in site_url and "uddg=" in site_url:
+                        try:
+                            site_url = unquote(site_url.split("uddg=")[1].split("&")[0])
+                        except Exception:
+                            pass
+
+                    if not site_url:
+                        continue
+                    if not site_url.startswith("http"):
+                        site_url = "https://" + site_url.split(" ")[0].split("›")[0].strip()
+
+                    try:
+                        parsed = urlparse(site_url)
+                        domain = parsed.netloc.replace("www.", "").lower()
+                    except Exception:
+                        continue
+
+                    # Only .ua domains
+                    if not domain.endswith(".ua"):
+                        continue
+                    # Skip aggregators
+                    if any(skip in domain for skip in self.SKIP_DOMAINS):
+                        continue
+                    if domain in seen_domains:
+                        continue
+                    seen_domains.add(domain)
+
+                    raw_name = title_el.get_text(strip=True)
+                    name = clean_company_name(
+                        raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                    )
+                    if len(name) < 3:
+                        name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+                    if len(name) < 3:
+                        continue
+
+                    description = snippet_el.get_text(strip=True)[:200] if snippet_el else ""
+
+                    lead = Lead(
+                        name=name,
+                        website=f"{parsed.scheme}://{parsed.netloc}",
+                        description=description or f"DuckDuckGo: {query}",
+                        source="duckduckgo",
+                    )
+
+                    # Enrich contacts from website
+                    self._scrape_contact_from_website(lead)
+                    lead.contact_source = "website" if (lead.email or lead.phone) else "manual_needed"
+
+                    leads.append(lead)
+
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] DuckDuckGo ({query}): {e}")
+                continue
+
+        logger.info(f"[ResearchAgent] DuckDuckGo found {len(leads)} leads for '{niche}'")
+        return leads
 
     # ── Google Organic Search ──────────────────────────────────────
 
@@ -785,11 +890,22 @@ class ResearchAgent:
 
             # Regex for UA phone if still missing
             if not lead.phone:
-                phones = re.findall(r"\+380\d{9}", html)
-                if not phones:
-                    phones = re.findall(r"(?<!\d)0\d{9}(?!\d)", html)
-                if phones:
-                    lead.phone = phones[0] if phones[0].startswith("+") else f"+38{phones[0]}"
+                # Match various formats: +380661234567, +38 (066) 123-45-67, 0661234567, etc.
+                phone_patterns = [
+                    r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",
+                    r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",
+                ]
+                for pattern in phone_patterns:
+                    phones = re.findall(pattern, html)
+                    if phones:
+                        # Normalize: strip everything except digits and leading +
+                        raw = phones[0]
+                        digits = re.sub(r"[^\d]", "", raw)
+                        if digits.startswith("380"):
+                            lead.phone = f"+{digits}"
+                        elif digits.startswith("0") and len(digits) == 10:
+                            lead.phone = f"+38{digits}"
+                        break
 
         except Exception as e:
             logger.debug(f"[ResearchAgent] Website scrape failed for {lead.name}: {e}")
