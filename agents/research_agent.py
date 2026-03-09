@@ -491,18 +491,25 @@ class ResearchAgent:
                         continue
 
                     href = card.get("href", "")
-                    website = href if href.startswith("http") else ""
+                    # Build full URL for prom.ua relative links
+                    if href.startswith("/"):
+                        href = f"https://prom.ua{href}"
+                    prom_url = href if href.startswith("http") else ""
 
                     lead = Lead(
                         name=name,
-                        website=website,
+                        website=prom_url,
                         description=f"Продавець на Prom.ua (запит: {query})",
                         source="prom.ua",
                     )
 
                     # Try to enrich from company page (get external website, phone, email)
-                    if website and "prom.ua" in website:
+                    if prom_url and "prom.ua" in prom_url:
                         self._enrich_lead_from_prom(lead)
+
+                    # If still no external website — try Google search
+                    if not lead.website or "prom.ua" in lead.website:
+                        self._find_website_via_google(lead)
 
                     # Scrape contacts from external website if available
                     if lead.website and "prom.ua" not in lead.website:
@@ -662,6 +669,30 @@ class ResearchAgent:
 
         except Exception as e:
             logger.debug(f"[ResearchAgent] Place Details failed for {lead.name}: {e}")
+
+    def _find_website_via_google(self, lead: Lead):
+        """Try to find the lead's external website via Google search."""
+        from urllib.parse import urlparse, quote_plus
+        try:
+            query = f"{lead.name} сайт Україна"
+            url = f"https://www.google.com/search?q={quote_plus(query)}&num=5&hl=uk"
+            resp = requests.get(url, headers=self.HEADERS, timeout=10)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+            for a_tag in soup.select("a[href]"):
+                href = a_tag.get("href", "")
+                if href.startswith("/url?q="):
+                    href = href.split("/url?q=")[1].split("&")[0]
+                if not href.startswith("http"):
+                    continue
+                domain = urlparse(href).netloc.replace("www.", "")
+                if domain.endswith(".ua") and not any(s in domain for s in self.SKIP_DOMAINS):
+                    lead.website = href
+                    lead.contact_source = "google_search"
+                    logger.info(f"[ResearchAgent] Found website via Google for '{lead.name}': {href}")
+                    return
+        except Exception as e:
+            logger.debug(f"[ResearchAgent] Google website search for '{lead.name}' failed: {e}")
 
     def _scrape_contact_from_website(self, lead: Lead):
         """Scrape email and phone from a company website."""

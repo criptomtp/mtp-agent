@@ -44,10 +44,14 @@ class StyleAgent:
         )
     }
 
-    def extract(self, url: str) -> Dict[str, str]:
-        """Scrape website and return brand style dict."""
+    def extract(self, url: str, lead_name: str = "") -> Dict[str, str]:
+        """Scrape website and return brand style dict. Tries Google if no URL."""
         if not url or not url.startswith("http"):
-            return {**DEFAULT_STYLE}
+            if lead_name:
+                url = self._find_website_via_google(lead_name)
+            if not url:
+                logger.info(f"[StyleAgent] No website found for '{lead_name}', using defaults")
+                return {**DEFAULT_STYLE}
 
         try:
             resp = requests.get(url, headers=self.HEADERS, timeout=10, allow_redirects=True)
@@ -76,6 +80,33 @@ class StyleAgent:
         except Exception as e:
             logger.warning(f"[StyleAgent] Failed to extract style from {url}: {e}")
             return {**DEFAULT_STYLE, "website": url}
+
+    def _find_website_via_google(self, name: str) -> str:
+        """Try to find company website via Google search."""
+        from urllib.parse import urlparse, quote_plus
+
+        skip_domains = {"prom.ua", "olx.ua", "rozetka.com.ua", "facebook.com",
+                        "instagram.com", "google.com", "youtube.com", "wikipedia.org"}
+        try:
+            query = f"{name} сайт Україна"
+            url = f"https://www.google.com/search?q={quote_plus(query)}&num=5&hl=uk"
+            resp = requests.get(url, headers=self.HEADERS, timeout=10)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+
+            for a_tag in soup.select("a[href]"):
+                href = a_tag.get("href", "")
+                if href.startswith("/url?q="):
+                    href = href.split("/url?q=")[1].split("&")[0]
+                if not href.startswith("http"):
+                    continue
+                domain = urlparse(href).netloc.replace("www.", "")
+                if domain.endswith(".ua") and not any(s in domain for s in skip_domains):
+                    logger.info(f"[StyleAgent] Found website via Google for '{name}': {href}")
+                    return href
+        except Exception as e:
+            logger.debug(f"[StyleAgent] Google search for '{name}' failed: {e}")
+        return ""
 
     def _extract_colors(self, soup: BeautifulSoup, html: str) -> list:
         """Extract most frequent non-generic colors from CSS."""

@@ -182,6 +182,7 @@ MTP FULFILLMENT (продавець):
 - Тарифи: {tariffs_text}
 - Контакти: mtpgrouppromo@gmail.com, +38 (050) 144-46-45, fulfillmentmtp.com.ua
 - Calendly: {calendly_url}
+- Клієнти-референси: KRKR (krkr.com.ua), ORNER (orner.com.ua), ELEMIS (elemis.com.ua)
 
 ЗАВДАННЯ:
 Створи УНІКАЛЬНУ HTML сторінку яка:
@@ -193,6 +194,14 @@ MTP FULFILLMENT (продавець):
 6. Адаптивна (mobile-friendly)
 7. Без зовнішніх залежностей (тільки Google Fonts дозволені)
 8. Tracking: при завантаженні fetch('{api_base}/api/proposals/track', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{slug:'{slug}', event:'open'}})}})\
+
+ОБОВ'ЯЗКОВІ ВИМОГИ ДО ВЕРСТКИ:
+- Sticky navbar (position:fixed, top:0, z-index:100, height ~60-70px) з: логотип "MTP Fulfillment" → <a href="https://fulfillmentmtp.com.ua" target="_blank">, телефон → <a href="tel:+380501444645">+38 (050) 144-46-45</a>, кнопка "Записатись" → <a href="{calendly_url}" target="_blank">
+- Hero секція ОБОВ'ЯЗКОВО має padding-top: мінімум 100px (щоб текст не ховався під sticky navbar)
+- Всі body секції мають padding-top достатній щоб не перекриватись navbar
+- Клієнти KRKR/ORNER/ELEMIS — клікабельні: <a href="https://krkr.com.ua" target="_blank">KRKR</a>, <a href="https://orner.com.ua" target="_blank">ORNER</a>, <a href="https://elemis.com.ua" target="_blank">ELEMIS</a>
+- Footer — всі контакти клікабельні: <a href="mailto:mtpgrouppromo@gmail.com">, <a href="tel:+380501444645">, <a href="https://fulfillmentmtp.com.ua" target="_blank">
+- Перевір: весь текст читабельний, немає overflow, кнопки не перекривають текст, контраст достатній
 
 ВАЖЛИВО: Поверни ТІЛЬКИ валідний HTML від <!DOCTYPE html> до </html>. Без markdown, без пояснень."""
 

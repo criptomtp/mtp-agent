@@ -97,14 +97,13 @@ async def run_pipeline(niche: str, count: int) -> dict:
             lead_name = lead.name
             progress = f"[{i+1}/{len(leads)}]"
 
-            # 1.5. Style extraction
+            # 1.5. Style extraction (tries Google if no website)
             brand_style = {}
-            if lead.website:
-                try:
-                    await _log(run_id, f"{progress} 🎨 Extracting brand style: {lead.website}")
-                    brand_style = style_agent.extract(lead.website)
-                except Exception as e:
-                    logger.warning(f"StyleAgent failed for {lead_name}: {e}")
+            try:
+                await _log(run_id, f"{progress} 🎨 Extracting brand style: {lead.website or lead_name}")
+                brand_style = style_agent.extract(lead.website, lead_name=lead_name)
+            except Exception as e:
+                logger.warning(f"StyleAgent failed for {lead_name}: {e}")
 
             # 2. Analysis
             await _agent_progress(run_id, 2, "Analysis", "running", f"{progress} Аналіз: {lead_name}")
