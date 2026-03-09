@@ -57,7 +57,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
         # Load API keys from DB (fall back to env vars in agents)
         api_keys = {}
-        for key_name in ["GEMINI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_MAPS_API_KEY", "GOOGLE_CUSTOM_SEARCH_API_KEY"]:
+        for key_name in ["GEMINI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_MAPS_API_KEY", "GOOGLE_CUSTOM_SEARCH_API_KEY", "SERPER_API_KEY"]:
             service = key_name.replace("_API_KEY", "").lower()
             val = get_decrypted_key(service)
             if not val:

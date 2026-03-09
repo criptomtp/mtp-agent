@@ -59,8 +59,8 @@ class ResearchAgent:
     OLX_SEARCH_URL = "https://www.olx.ua/d/uk/q-{query}/"
     INSTAGRAM_GRAPH_URL = "https://graph.facebook.com/v19.0"
 
-    # All available search channels — DuckDuckGo first (Google blocks scraping)
-    ALL_CHANNELS = ["duckduckgo", "google", "prom", "google_maps", "google_search", "olx", "instagram", "facebook"]
+    # All available search channels — Serper (Google API) first, then Prom.ua fallback
+    ALL_CHANNELS = ["serper", "prom", "google", "google_maps", "google_search", "olx", "instagram", "facebook"]
 
     def __init__(self, api_keys: Optional[dict] = None, channels: Optional[List[str]] = None):
         self._api_keys = api_keys or {}
@@ -226,7 +226,7 @@ class ResearchAgent:
         # Request 2x to account for dedup filtering
         remaining = lambda: max(0, count * 2 - len(leads))
         channel_methods = {
-            "duckduckgo": lambda: self._search_duckduckgo(remaining(), niche=niche),
+            "serper": lambda: self._search_serper(remaining(), niche=niche),
             "google": lambda: self._search_google(remaining(), niche=niche),
             "prom": lambda: self._search_prom(remaining(), niche=niche),
             "google_maps": lambda: self._search_google_maps(remaining(), niche=niche),
@@ -418,111 +418,87 @@ class ResearchAgent:
             logger.warning(f"[Research] Дедуплікація не вдалась: {e}")
             return leads
 
-    # ── DuckDuckGo HTML Search ─────────────────────────────────────
+    # ── Serper.dev Google Search API ──────────────────────────────
 
-    def _search_duckduckgo(self, count: int, niche: str = "косметика") -> List[Lead]:
-        """Search DuckDuckGo HTML version — more reliable than Google scraping.
+    def _search_serper(self, count: int, niche: str = "косметика") -> List[Lead]:
+        """Search via Serper.dev API (Google results, free tier 2500 req/month)."""
+        from urllib.parse import urlparse
 
-        Uses a single query (DDG rate-limits after 1-2 requests with 202 status).
-        Prefers .ua domains but accepts .com/.net with Ukrainian keywords.
-        """
-        import time
-        from urllib.parse import urlparse, unquote
+        api_key = self._api_keys.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY", "")
+        if not api_key:
+            logger.info("[ResearchAgent] SERPER_API_KEY not set, skipping Serper search")
+            return []
 
         leads = []
         seen_domains: set = set()
-        # Single comprehensive query to avoid rate-limiting (DDG returns 202 on 2nd+ request)
-        query = f"{niche} інтернет магазин Україна купити"
+        queries = [
+            f"{niche} інтернет магазин Україна",
+            f"{niche} купити оптом Україна",
+        ]
 
-        try:
-            resp = requests.post(
-                "https://html.duckduckgo.com/html/",
-                data={"q": query, "s": "0"},
-                headers=self.HEADERS,
-                timeout=15,
-            )
-            if resp.status_code == 202:
-                logger.warning(f"[ResearchAgent] DuckDuckGo rate-limited (202), trying with delay...")
-                time.sleep(3)
+        for query in queries:
+            if len(leads) >= count:
+                break
+            try:
                 resp = requests.post(
-                    "https://html.duckduckgo.com/html/",
-                    data={"q": query, "s": "0"},
-                    headers=self.HEADERS,
-                    timeout=15,
+                    "https://google.serper.dev/search",
+                    json={"q": query, "gl": "ua", "hl": "uk", "num": 20},
+                    headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+                    timeout=10,
                 )
-            if resp.status_code != 200:
-                logger.warning(f"[ResearchAgent] DuckDuckGo returned {resp.status_code}")
-                return []
+                resp.raise_for_status()
+                data = resp.json()
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+                for item in data.get("organic", []):
+                    if len(leads) >= count:
+                        break
 
-            for result in soup.select(".result"):
-                if len(leads) >= count:
-                    break
+                    link = item.get("link", "")
+                    title = item.get("title", "")
+                    snippet = item.get("snippet", "")
 
-                title_el = result.select_one("a.result__a")
-                snippet_el = result.select_one(".result__snippet")
+                    if not link or not link.startswith("http"):
+                        continue
 
-                if not title_el:
-                    continue
-
-                href = title_el.get("href", "")
-                site_url = href
-                if "uddg=" in href:
                     try:
-                        site_url = unquote(href.split("uddg=")[1].split("&")[0])
+                        parsed = urlparse(link)
+                        domain = parsed.netloc.replace("www.", "").lower()
                     except Exception:
-                        pass
+                        continue
 
-                if not site_url or not site_url.startswith("http"):
-                    continue
+                    # Skip aggregators
+                    if any(skip in domain for skip in self.SKIP_DOMAINS):
+                        continue
+                    if domain in seen_domains:
+                        continue
+                    seen_domains.add(domain)
 
-                try:
-                    parsed = urlparse(site_url)
-                    domain = parsed.netloc.replace("www.", "").lower()
-                except Exception:
-                    continue
+                    name = clean_company_name(
+                        title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                    )
+                    if len(name) < 3:
+                        name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+                    if len(name) < 3:
+                        continue
 
-                # Prefer .ua but also accept .com/.com.ua with Ukrainian content
-                is_ua = domain.endswith(".ua")
-                is_acceptable = is_ua or domain.endswith(".com") or domain.endswith(".net")
-                if not is_acceptable:
-                    continue
-                # Skip aggregators/marketplaces
-                if any(skip in domain for skip in self.SKIP_DOMAINS):
-                    continue
-                if domain in seen_domains:
-                    continue
-                seen_domains.add(domain)
+                    lead = Lead(
+                        name=name,
+                        website=f"{parsed.scheme}://{parsed.netloc}",
+                        description=snippet[:200] or f"Google: {query}",
+                        source="google",
+                    )
 
-                raw_name = title_el.get_text(strip=True)
-                name = clean_company_name(
-                    raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
-                )
-                if len(name) < 3:
-                    name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
-                if len(name) < 3:
-                    continue
+                    # Enrich contacts from website
+                    self._scrape_contact_from_website(lead)
+                    lead.contact_source = "website" if (lead.email or lead.phone) else "manual_needed"
 
-                description = snippet_el.get_text(strip=True)[:200] if snippet_el else ""
+                    leads.append(lead)
 
-                lead = Lead(
-                    name=name,
-                    website=f"{parsed.scheme}://{parsed.netloc}",
-                    description=description or f"DuckDuckGo: {query}",
-                    source="duckduckgo",
-                )
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] Serper ({query}): {e}")
+                continue
 
-                # Enrich contacts from website
-                self._scrape_contact_from_website(lead)
-                lead.contact_source = "website" if (lead.email or lead.phone) else "manual_needed"
-
-                leads.append(lead)
-
-        except Exception as e:
-            logger.warning(f"[ResearchAgent] DuckDuckGo ({query}): {e}")
-
-        logger.info(f"[ResearchAgent] DuckDuckGo found {len(leads)} leads for '{niche}'")
+        logger.info(f"[ResearchAgent] Serper found {len(leads)} leads for '{niche}'")
         return leads
 
     # ── Google Organic Search ──────────────────────────────────────
