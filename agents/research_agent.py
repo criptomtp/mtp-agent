@@ -421,96 +421,106 @@ class ResearchAgent:
     # ── DuckDuckGo HTML Search ─────────────────────────────────────
 
     def _search_duckduckgo(self, count: int, niche: str = "косметика") -> List[Lead]:
-        """Search DuckDuckGo HTML version — more reliable than Google scraping."""
+        """Search DuckDuckGo HTML version — more reliable than Google scraping.
+
+        Uses a single query (DDG rate-limits after 1-2 requests with 202 status).
+        Prefers .ua domains but accepts .com/.net with Ukrainian keywords.
+        """
+        import time
         from urllib.parse import urlparse, unquote
 
         leads = []
         seen_domains: set = set()
-        queries = [
-            f"{niche} інтернет магазин Україна купити",
-            f"{niche} оптом Україна",
-            f"{niche} виробник Україна сайт",
-        ]
+        # Single comprehensive query to avoid rate-limiting (DDG returns 202 on 2nd+ request)
+        query = f"{niche} інтернет магазин Україна купити"
 
-        for query in queries:
-            if len(leads) >= count:
-                break
-            try:
+        try:
+            resp = requests.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": query, "s": "0"},
+                headers=self.HEADERS,
+                timeout=15,
+            )
+            if resp.status_code == 202:
+                logger.warning(f"[ResearchAgent] DuckDuckGo rate-limited (202), trying with delay...")
+                time.sleep(3)
                 resp = requests.post(
                     "https://html.duckduckgo.com/html/",
                     data={"q": query, "s": "0"},
                     headers=self.HEADERS,
                     timeout=15,
                 )
-                resp.raise_for_status()
-                soup = BeautifulSoup(resp.text, "html.parser")
+            if resp.status_code != 200:
+                logger.warning(f"[ResearchAgent] DuckDuckGo returned {resp.status_code}")
+                return []
 
-                # Each result is a div.result containing a.result__a (title+link)
-                for result in soup.select(".result"):
-                    if len(leads) >= count:
-                        break
+            soup = BeautifulSoup(resp.text, "html.parser")
 
-                    title_el = result.select_one("a.result__a")
-                    snippet_el = result.select_one(".result__snippet")
+            for result in soup.select(".result"):
+                if len(leads) >= count:
+                    break
 
-                    if not title_el:
-                        continue
+                title_el = result.select_one("a.result__a")
+                snippet_el = result.select_one(".result__snippet")
 
-                    # URL is in the <a> href, wrapped in DDG redirect with uddg= param
-                    href = title_el.get("href", "")
-                    site_url = href
-                    if "uddg=" in href:
-                        try:
-                            site_url = unquote(href.split("uddg=")[1].split("&")[0])
-                        except Exception:
-                            pass
+                if not title_el:
+                    continue
 
-                    if not site_url or not site_url.startswith("http"):
-                        continue
-
+                href = title_el.get("href", "")
+                site_url = href
+                if "uddg=" in href:
                     try:
-                        parsed = urlparse(site_url)
-                        domain = parsed.netloc.replace("www.", "").lower()
+                        site_url = unquote(href.split("uddg=")[1].split("&")[0])
                     except Exception:
-                        continue
+                        pass
 
-                    # Only .ua domains
-                    if not domain.endswith(".ua"):
-                        continue
-                    # Skip aggregators
-                    if any(skip in domain for skip in self.SKIP_DOMAINS):
-                        continue
-                    if domain in seen_domains:
-                        continue
-                    seen_domains.add(domain)
+                if not site_url or not site_url.startswith("http"):
+                    continue
 
-                    raw_name = title_el.get_text(strip=True)
-                    name = clean_company_name(
-                        raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
-                    )
-                    if len(name) < 3:
-                        name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
-                    if len(name) < 3:
-                        continue
+                try:
+                    parsed = urlparse(site_url)
+                    domain = parsed.netloc.replace("www.", "").lower()
+                except Exception:
+                    continue
 
-                    description = snippet_el.get_text(strip=True)[:200] if snippet_el else ""
+                # Prefer .ua but also accept .com/.com.ua with Ukrainian content
+                is_ua = domain.endswith(".ua")
+                is_acceptable = is_ua or domain.endswith(".com") or domain.endswith(".net")
+                if not is_acceptable:
+                    continue
+                # Skip aggregators/marketplaces
+                if any(skip in domain for skip in self.SKIP_DOMAINS):
+                    continue
+                if domain in seen_domains:
+                    continue
+                seen_domains.add(domain)
 
-                    lead = Lead(
-                        name=name,
-                        website=f"{parsed.scheme}://{parsed.netloc}",
-                        description=description or f"DuckDuckGo: {query}",
-                        source="duckduckgo",
-                    )
+                raw_name = title_el.get_text(strip=True)
+                name = clean_company_name(
+                    raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                )
+                if len(name) < 3:
+                    name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
+                if len(name) < 3:
+                    continue
 
-                    # Enrich contacts from website
-                    self._scrape_contact_from_website(lead)
-                    lead.contact_source = "website" if (lead.email or lead.phone) else "manual_needed"
+                description = snippet_el.get_text(strip=True)[:200] if snippet_el else ""
 
-                    leads.append(lead)
+                lead = Lead(
+                    name=name,
+                    website=f"{parsed.scheme}://{parsed.netloc}",
+                    description=description or f"DuckDuckGo: {query}",
+                    source="duckduckgo",
+                )
 
-            except Exception as e:
-                logger.warning(f"[ResearchAgent] DuckDuckGo ({query}): {e}")
-                continue
+                # Enrich contacts from website
+                self._scrape_contact_from_website(lead)
+                lead.contact_source = "website" if (lead.email or lead.phone) else "manual_needed"
+
+                leads.append(lead)
+
+        except Exception as e:
+            logger.warning(f"[ResearchAgent] DuckDuckGo ({query}): {e}")
 
         logger.info(f"[ResearchAgent] DuckDuckGo found {len(leads)} leads for '{niche}'")
         return leads

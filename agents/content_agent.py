@@ -184,7 +184,16 @@ class ContentAgent:
         clients_text = get_clients_text()
         clients_links = " ".join([f'<a href="{c["url"]}" target="_blank">{c["name"]}</a>' for c in MTP_CLIENTS])
 
-        prompt = f"""Ти — топовий UX/UI дизайнер і копірайтер. Створи повну HTML-сторінку комерційної пропозиції від MTP Fulfillment для клієнта.
+        prompt = f"""<BRAND_COLORS>
+primary_color: {brand_primary}
+secondary_color: {brand_secondary}
+font: {brand_font}
+</BRAND_COLORS>
+
+ІНСТРУКЦІЯ: hero фон = {brand_primary}, navbar фон = {brand_primary}, заголовки h2 колір = {brand_primary}.
+НЕ використовуй #1A365D якщо brand_primary != #1A365D. НЕ вигадуй свої кольори.
+
+Ти — топовий UX/UI дизайнер і копірайтер. Створи повну HTML-сторінку комерційної пропозиції від MTP Fulfillment для клієнта.
 
 КЛІЄНТ:
 - Назва: {client_name}
@@ -276,6 +285,16 @@ MTP FULFILLMENT (продавець):
             valid, issues = self._validate_html(html, brand_primary)
             if not valid:
                 logger.warning(f"[ContentAgent] HTML issues for {client_name}: {'; '.join(issues)}")
+
+            # Force brand color if Gemini ignored it
+            if brand_primary.lower() != "#1a365d" and brand_primary.lower() not in html.lower():
+                logger.warning(f"[ContentAgent] Gemini ignored brand color {brand_primary} for {client_name}, force-replacing")
+                # Replace common default colors Gemini might use instead
+                for default_color in ["#1A365D", "#1a365d", "#2c3e50", "#1a1a2e", "#0f172a"]:
+                    if default_color in html:
+                        html = html.replace(default_color, brand_primary)
+                        logger.info(f"[ContentAgent] Replaced {default_color} → {brand_primary}")
+                        break
 
         except Exception as e:
             logger.error(f"[ContentAgent] Gemini HTML generation failed: {e}", exc_info=True)
