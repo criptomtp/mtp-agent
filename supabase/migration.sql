@@ -89,3 +89,7 @@ on conflict (id) do nothing;
 -- Scoring columns on leads
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS score integer DEFAULT 0;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS score_grade text DEFAULT 'D';
+
+-- Extra contact fields
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS extra_phones text DEFAULT '';
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS social_media jsonb DEFAULT '{}';

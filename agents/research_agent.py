@@ -28,6 +28,8 @@ class Lead:
     products_count: int = 0
     source: str = ""
     contact_source: str = ""
+    extra_phones: str = ""
+    social_media: str = ""  # JSON string: {"instagram": "url", ...}
 
 
 def _normalize_name(name: str) -> str:
@@ -38,14 +40,31 @@ def _normalize_name(name: str) -> str:
     return name
 
 
-def clean_company_name(name: str) -> str:
+def clean_company_name(name: str, website: str = "") -> str:
     """Обрізає довгі назви компаній до читабельної форми."""
-    if len(name) <= 40:
-        return name
-    for sep in [",", "(", "\u2014", " - ", " | "]:
-        if sep in name:
-            return name.split(sep)[0].strip()
-    return name[:40].strip()
+    if len(name) <= 80:
+        result = name
+    else:
+        result = name
+        for sep in [",", "(", "\u2014", " - ", " | "]:
+            if sep in name:
+                result = name.split(sep)[0].strip()
+                break
+        else:
+            result = name[:80].strip()
+
+    # Fallback to domain if name is too short or ends abruptly
+    bad_endings = ("чи", "та", "або", "для", "хл", "дл", "ін", "пр", "ко", "за", "на", "по")
+    if len(result) < 5 or result.endswith(bad_endings):
+        if website:
+            from urllib.parse import urlparse
+            try:
+                domain = urlparse(website).netloc.replace("www.", "")
+                if domain:
+                    result = domain
+            except Exception:
+                pass
+    return result
 
 
 class ResearchAgent:
@@ -474,8 +493,10 @@ class ResearchAgent:
                         continue
                     seen_domains.add(domain)
 
+                    website_url = f"{parsed.scheme}://{parsed.netloc}"
                     name = clean_company_name(
-                        title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                        title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip(),
+                        website=website_url,
                     )
                     if len(name) < 3:
                         name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
@@ -484,7 +505,7 @@ class ResearchAgent:
 
                     lead = Lead(
                         name=name,
-                        website=f"{parsed.scheme}://{parsed.netloc}",
+                        website=website_url,
                         description=snippet[:200] or f"Google: {query}",
                         source="google",
                     )
@@ -583,7 +604,8 @@ class ResearchAgent:
 
                     raw_name = h3.get_text(strip=True)
                     name = clean_company_name(
-                        raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+                        raw_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip(),
+                        website=site_url,
                     )
                     if len(name) < 3:
                         name = domain.split(".")[0].replace("-", " ").replace("_", " ").title()
@@ -883,65 +905,99 @@ class ResearchAgent:
             logger.debug(f"[ResearchAgent] Website scrape failed for {lead.name}: {e}")
 
     def _extract_contacts_from_html(self, lead: Lead, html: str):
-        """Extract email and phone from HTML text."""
+        """Extract all emails, phones, and social media from HTML."""
+        import json as _json
+        from urllib.parse import unquote
+
         soup = BeautifulSoup(html, "lxml")
 
-        # Extract email from mailto: links
-        if not lead.email:
-            for mailto in soup.select("[href^='mailto:']"):
-                email = mailto["href"].replace("mailto:", "").split("?")[0].strip()
-                if "@" in email and not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
-                    lead.email = email
-                    break
+        # ── Collect ALL emails from mailto: links ──
+        all_emails = []
+        for mailto in soup.select("[href^='mailto:']"):
+            email = unquote(mailto["href"].replace("mailto:", "").split("?")[0].strip())
+            if "@" in email and not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
+                if email not in all_emails:
+                    all_emails.append(email)
 
-        # Regex fallback for email
-        if not lead.email:
-            emails = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.(?:ua|com|net|org|info)", html)
-            for email in emails:
-                if not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
-                    lead.email = email
-                    break
+        # Regex fallback for emails
+        if len(all_emails) < 2:
+            regex_emails = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.(?:ua|com|net|org|info)", html)
+            for email in regex_emails:
+                if not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS) and email not in all_emails:
+                    all_emails.append(email)
 
-        # Extract phone from tel: links first (most reliable)
-        if not lead.phone:
-            for tel in soup.select("[href^='tel:']"):
-                raw = tel["href"].replace("tel:", "").strip()
-                digits = re.sub(r"[^\d]", "", raw)
-                if digits.startswith("380") and len(digits) >= 12:
-                    lead.phone = f"+{digits[:12]}"
-                    break
-                elif digits.startswith("0") and len(digits) >= 10:
-                    lead.phone = f"+38{digits[:10]}"
-                    break
+        all_emails = all_emails[:2]
+        if not lead.email and all_emails:
+            lead.email = all_emails[0]
 
-        # Regex fallback for phone
-        if not lead.phone:
+        # ── Collect ALL phones from tel: links ──
+        all_phones = []
+        for tel in soup.select("[href^='tel:']"):
+            raw = unquote(tel["href"].replace("tel:", "").strip())
+            digits = re.sub(r"[^\d+]", "", raw)
+            # Normalize to +380 format
+            clean_digits = re.sub(r"[^\d]", "", digits)
+            phone = None
+            if clean_digits.startswith("380") and len(clean_digits) >= 12:
+                phone = f"+{clean_digits[:12]}"
+            elif clean_digits.startswith("0") and len(clean_digits) >= 10:
+                phone = f"+38{clean_digits[:10]}"
+            if phone and phone not in all_phones:
+                all_phones.append(phone)
+
+        # Regex fallback for phones
+        if len(all_phones) < 3:
             phone_patterns = [
                 r"\+?38\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
                 r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",
                 r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",
-                r"8\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
             ]
             for pattern in phone_patterns:
-                phones = re.findall(pattern, html)
-                if phones:
-                    raw = phones[0]
-                    digits = re.sub(r"[^\d]", "", raw)
-                    if digits.startswith("380") and len(digits) >= 12:
-                        lead.phone = f"+{digits[:12]}"
-                    elif digits.startswith("80") and len(digits) >= 11:
-                        lead.phone = f"+3{digits[:11]}"
-                    elif digits.startswith("0") and len(digits) >= 10:
-                        lead.phone = f"+38{digits[:10]}"
-                    break
+                for raw in re.findall(pattern, html):
+                    clean_digits = re.sub(r"[^\d]", "", raw)
+                    phone = None
+                    if clean_digits.startswith("380") and len(clean_digits) >= 12:
+                        phone = f"+{clean_digits[:12]}"
+                    elif clean_digits.startswith("80") and len(clean_digits) >= 11:
+                        phone = f"+3{clean_digits[:11]}"
+                    elif clean_digits.startswith("0") and len(clean_digits) >= 10:
+                        phone = f"+38{clean_digits[:10]}"
+                    if phone and phone not in all_phones:
+                        all_phones.append(phone)
 
-        # Try to extract city from address/location elements
+        all_phones = all_phones[:3]
+        if not lead.phone and all_phones:
+            lead.phone = all_phones[0]
+        # Store extra phones (beyond the first one)
+        extra = [p for p in all_phones if p != lead.phone]
+        if extra:
+            lead.extra_phones = ", ".join(extra)
+
+        # ── Collect social media links ──
+        social = {}
+        if not lead.social_media or lead.social_media == "{}":
+            social_platforms = {
+                "instagram": r'https?://(?:www\.)?instagram\.com/[^\s"\'<>]+',
+                "facebook": r'https?://(?:www\.)?facebook\.com/[^\s"\'<>]+',
+                "tiktok": r'https?://(?:www\.)?tiktok\.com/[^\s"\'<>]+',
+                "telegram": r'https?://t\.me/[^\s"\'<>]+',
+                "youtube": r'https?://(?:www\.)?youtube\.com/[^\s"\'<>]+',
+                "linkedin": r'https?://(?:www\.)?linkedin\.com/[^\s"\'<>]+',
+            }
+            for platform, pattern in social_platforms.items():
+                matches = re.findall(pattern, html, re.I)
+                if matches:
+                    social[platform] = matches[0].rstrip("/")
+
+            if social:
+                lead.social_media = _json.dumps(social, ensure_ascii=False)
+
+        # ── Extract city from address/location elements ──
         if not lead.city:
             for sel in ["[class*='address']", "[class*='location']", "[class*='city']", "[itemprop='address']"]:
                 el = soup.select_one(sel)
                 if el:
                     text = el.get_text(strip=True)[:100]
-                    # Look for Ukrainian city names
                     cities = re.findall(r"(?:Київ|Харків|Одеса|Дніпро|Львів|Запоріжжя|Вінниця|Полтава|Чернігів|Суми|Рівне|Тернопіль|Житомир|Хмельницький|Черкаси|Кропивницький|Миколаїв|Херсон|Чернівці|Івано-Франківськ|Ужгород|Луцьк|Бориспіль)", text)
                     if cities:
                         lead.city = cities[0]
@@ -995,7 +1051,7 @@ class ResearchAgent:
                     # Extract domain as company name fallback
                     from urllib.parse import urlparse
                     domain = urlparse(link).netloc.replace("www.", "")
-                    name = clean_company_name(title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip())
+                    name = clean_company_name(title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip(), website=link)
                     if not name or len(name) < 3:
                         name = domain
 

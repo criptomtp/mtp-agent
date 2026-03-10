@@ -105,7 +105,7 @@ export default function Leads() {
   const proposalUrl = selected
     ? (selected.proposal_url || (htmlFile ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal` : null))
     : null;
-  const pptxUrl = selected && pptxFile && pptxFile.file_url
+  const pptxUrl = selected && pptxFile
     ? `${import.meta.env.VITE_API_URL || ""}/api/leads/${selected.id}/proposal.pptx`
     : null;
   const emailText = emailFile?.content_text || "";
@@ -208,6 +208,9 @@ export default function Leads() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
                   <ContactRow icon="📧" label="Email" value={selected.email} href={selected.email ? `mailto:${selected.email}` : undefined} />
                   <ContactRow icon="📞" label="Телефон" value={selected.phone} href={selected.phone ? `tel:${selected.phone}` : undefined} />
+                  {selected.extra_phones && (
+                    <ContactRow icon="📞" label="Додатково" value={selected.extra_phones} />
+                  )}
                   <ContactRow icon="🌐" label="Сайт" value={selected.website} href={selected.website} external />
                   <ContactRow icon="📍" label="Місто" value={selected.city} />
                   {selected.instagram && (
@@ -218,6 +221,25 @@ export default function Leads() {
                     <ContactRow icon="✈️" label="Telegram" value={selected.telegram}
                       href={selected.telegram.startsWith("http") ? selected.telegram : `https://t.me/${selected.telegram}`} external />
                   )}
+                  {selected.social_media && (() => {
+                    try {
+                      const social = typeof selected.social_media === 'string'
+                        ? JSON.parse(selected.social_media)
+                        : selected.social_media;
+                      const platformIcons: Record<string, string> = {
+                        instagram: "📸", facebook: "👤", tiktok: "🎵",
+                        telegram: "✈️", youtube: "▶️", linkedin: "💼",
+                      };
+                      return Object.entries(social).map(([platform, url]) => (
+                        <ContactRow key={platform}
+                          icon={platformIcons[platform] || "🔗"}
+                          label={platform}
+                          value={url as string}
+                          href={url as string}
+                          external />
+                      ));
+                    } catch { return null; }
+                  })()}
                 </div>
                 {!selected.email && !selected.phone && !selected.website && (
                   <p className="text-sm text-gray-400 italic mt-1">Контакти не знайдено</p>

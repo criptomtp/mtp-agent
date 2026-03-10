@@ -3,6 +3,7 @@
 import os
 import json
 import logging
+import re
 from typing import Dict, Any, List, Optional
 
 import requests
@@ -45,6 +46,38 @@ def _format_tariffs_for_prompt(tariffs: Optional[List[Dict[str, Any]]]) -> str:
         if lines:
             return json.dumps(lines, ensure_ascii=False, indent=2)
     return json.dumps(HARDCODED_TARIFFS, ensure_ascii=False, indent=2)
+
+
+def _scrape_cooperation_page(url: str) -> str:
+    """Try to find and scrape a cooperation/partnership page on the website."""
+    if not url or not url.startswith("http"):
+        return ""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    cooperation_paths = [
+        "/partnership", "/cooperation", "/b2b", "/оптом", "/партнерам",
+        "/співпраця", "/wholesale", "/partners", "/for-partners",
+        "/dla-partnerov", "/opt", "/дропшипінг", "/dropshipping",
+    ]
+    for path in cooperation_paths:
+        try:
+            resp = requests.get(
+                base + path,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                timeout=6, allow_redirects=True,
+            )
+            if resp.status_code == 200 and len(resp.text) > 500:
+                soup = BeautifulSoup(resp.text, "lxml")
+                for tag in soup(["script", "style", "nav", "footer", "header"]):
+                    tag.decompose()
+                text = soup.get_text(separator=" ", strip=True)[:1500]
+                if any(kw in text.lower() for kw in ["партнер", "співпраця", "оптов", "b2b", "дропшип", "wholesale"]):
+                    logger.info(f"  [AnalysisAgent] Found cooperation page: {base + path}")
+                    return text
+        except Exception:
+            continue
+    return ""
 
 
 def _scrape_website(url: str) -> Dict[str, Any]:
@@ -147,6 +180,9 @@ def _scrape_website(url: str) -> Dict[str, Any]:
         brand_words = [w for w in brand_text.split() if len(w) > 3]
         brand_keywords = brand_words[:20]
 
+        # Scrape cooperation/partnership page for personalization
+        cooperation_text = _scrape_cooperation_page(url)
+
         return {
             "title": title,
             "meta_description": meta_desc,
@@ -157,6 +193,7 @@ def _scrape_website(url: str) -> Dict[str, Any]:
             "social": social,
             "tone": tone,
             "brand_keywords": brand_keywords,
+            "cooperation_text": cooperation_text,
         }
     except Exception as e:
         logger.debug(f"Website scrape failed for {url}: {e}")
@@ -187,6 +224,9 @@ def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any], n
             website_section += f"\nТон комунікації: {tone}"
         if colors:
             website_section += f"\nОсновні кольори сайту: {', '.join(colors[:3])}"
+        cooperation = website_data.get("cooperation_text", "")
+        if cooperation:
+            website_section += f"\n\nСторінка співпраці/партнерства:\n{cooperation[:800]}"
 
     system_prompt = (
         "Ти досвідчений B2B маркетолог і копірайтер. Пишеш українською мовою. "
