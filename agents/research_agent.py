@@ -31,6 +31,7 @@ class Lead:
     source: str = ""
     contact_source: str = ""
     extra_phones: str = ""
+    extra_emails: str = ""
     social_media: str = ""  # JSON string: {"instagram": "url", ...}
     instagram_followers: Optional[int] = None
     instagram_following: Optional[int] = None
@@ -887,6 +888,23 @@ class ResearchAgent:
         last9 = digits[-9:]
         return len(set(last9)) <= 2
 
+    @staticmethod
+    def _pick_best_email(emails: list, site_domain: str) -> str:
+        """Pick the best email: prefer corporate domain, then specific, then first."""
+        if not emails:
+            return ""
+        # Prefer corporate email (matching site domain)
+        if site_domain:
+            corporate = [e for e in emails if site_domain in e.lower()]
+            if corporate:
+                return corporate[0]
+        # Prefer non-generic prefix
+        generic_prefixes = ("info@", "support@", "sales@", "hello@", "contact@", "mail@", "office@")
+        specific = [e for e in emails if not any(e.lower().startswith(p) for p in generic_prefixes)]
+        if specific:
+            return specific[0]
+        return emails[0]
+
     def _scrape_contact_from_website(self, lead: Lead):
         """Scrape email and phone from a company website + cooperation pages."""
         from urllib.parse import urlparse
@@ -896,15 +914,18 @@ class ResearchAgent:
             parsed_base = urlparse(base_url)
             base_origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
 
-            # Pages to check — main page + cooperation/contact pages
+            # Pages to check — main page + contact/cooperation pages
             pages_to_check = [base_url]
-            cooperation_paths = [
-                "/contacts", "/kontakty", "/контакти", "/contact",
-                "/cooperation", "/partners", "/b2b", "/wholesale",
-                "/співпраця", "/партнерам", "/оптом", "/about",
+            CONTACT_PATHS = [
+                "/contact", "/contacts", "/контакти", "/kontakty", "/kontakti",
+                "/about", "/about-us", "/про-нас", "/pro-nas",
+                "/cooperation", "/співпраця", "/spivpratsya", "/partners", "/партнерам",
+                "/info", "/information", "/help", "/faq",
+                "/wholesale", "/opt", "/b2b", "/wholesale-buyers",
                 "/for-business", "/business", "/trade", "/корпоративним", "/бізнес",
+                "/оптом",
             ]
-            for path in cooperation_paths:
+            for path in CONTACT_PATHS:
                 pages_to_check.append(base_origin + path)
 
             for page_url in pages_to_check:
@@ -1147,24 +1168,52 @@ class ResearchAgent:
 
         soup = BeautifulSoup(html, "lxml")
 
-        # ── Collect ALL emails from mailto: links ──
+        # ── Collect ALL emails: mailto: links + plain text regex ──
+        JUNK_EMAIL_PREFIXES = {"example@", "test@", "noreply@", "no-reply@", "donotreply@", "support@sentry", "admin@example"}
         all_emails = []
+
+        # 1) mailto: links
         for mailto in soup.select("[href^='mailto:']"):
             email = unquote(mailto["href"].replace("mailto:", "").split("?")[0].strip())
             if "@" in email and not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
                 if email not in all_emails:
                     all_emails.append(email)
 
-        # Regex fallback for emails
-        if len(all_emails) < 2:
-            regex_emails = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.(?:ua|com|net|org|info)", html)
-            for email in regex_emails:
-                if not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS) and email not in all_emails:
-                    all_emails.append(email)
+        # 2) Regex search in ALL page text (catches emails not in mailto: links)
+        all_text = soup.get_text(separator=" ")
+        text_emails = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", all_text)
+        for email in text_emails:
+            if email in all_emails:
+                continue
+            if any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
+                continue
+            if any(j in email.lower() for j in JUNK_EMAIL_PREFIXES):
+                continue
+            all_emails.append(email)
 
-        all_emails = all_emails[:2]
-        if not lead.email and all_emails:
-            lead.email = all_emails[0]
+        # 3) Regex in raw HTML (catches emails in href, data attributes, etc.)
+        if len(all_emails) < 2:
+            html_emails = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.(?:ua|com|net|org|info|biz|pro)", html)
+            for email in html_emails:
+                if email not in all_emails and not any(d in email.lower() for d in self.JUNK_EMAIL_DOMAINS):
+                    if not any(j in email.lower() for j in JUNK_EMAIL_PREFIXES):
+                        all_emails.append(email)
+
+        # Pick best email + store extras
+        from urllib.parse import urlparse as _urlparse
+        site_domain = _urlparse(lead.website).netloc.replace("www.", "") if lead.website else ""
+        all_emails = all_emails[:5]  # cap to avoid noise
+
+        if all_emails and not lead.email:
+            lead.email = self._pick_best_email(all_emails, site_domain)
+        # Store extra emails (beyond the chosen one)
+        extras = [e for e in all_emails if e != lead.email]
+        if extras:
+            existing = lead.extra_emails.split(", ") if lead.extra_emails else []
+            for e in extras:
+                if e not in existing:
+                    existing.append(e)
+            lead.extra_emails = ", ".join(existing[:4])
 
         # ── Collect ALL phones from tel: links with context ──
         online_phones = []
