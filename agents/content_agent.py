@@ -53,6 +53,19 @@ def _escape_html(text: str) -> str:
     return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def _get_text_color_for_bg(hex_color: str) -> str:
+    """Return '#fff' or '#222' based on perceived brightness of background color."""
+    hex_color = hex_color.strip().lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = "".join(c * 2 for c in hex_color)
+    try:
+        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    except (ValueError, IndexError):
+        return "#fff"
+    brightness = (r * 299 + g * 587 + b * 114) / 1000
+    return "#222" if brightness > 160 else "#fff"
+
+
 class ContentAgent:
     """Генерує HTML презентацію та email текст."""
 
@@ -720,6 +733,8 @@ img { max-width: 100% !important; height: auto !important; }
         brand_primary = bs.get("primary_color", "#0f172a")
         brand_secondary = bs.get("secondary_color", "#1e40af")
         mtp_accent = "#E53E3E"
+        hero_text_color = _get_text_color_for_bg(brand_primary)
+        navbar_text_color = hero_text_color
 
         hook = _escape_html(analysis.get("hook", f"{lead.name}: час масштабуватись"))
         client_insight = _escape_html(analysis.get("client_insight", ""))
@@ -806,6 +821,7 @@ img { max-width: 100% !important; height: auto !important; }
   --brand-primary: {brand_primary};
   --brand-secondary: {brand_secondary};
   --mtp-accent: {mtp_accent};
+  --hero-text: {hero_text_color};
   --text-dark: #333;
   --text-light: #f8f8f8;
   --neutral-bg: #f5f5f5;
@@ -824,14 +840,14 @@ h2 {{ color: var(--brand-primary); text-align: center; font-size: 2rem; margin-b
 /* Navbar */
 .navbar {{ position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: var(--brand-primary);
   padding: 0 2rem; height: 64px; display: flex; align-items: center; justify-content: space-between; }}
-.navbar a {{ color: #fff; font-weight: 600; }}
+.navbar a {{ color: var(--hero-text); font-weight: 600; }}
 .navbar .nav-logo {{ font-size: 1.1rem; letter-spacing: 1px; }}
 .navbar .nav-actions {{ display: flex; align-items: center; gap: 1.5rem; }}
 .navbar .nav-actions a {{ font-size: 0.9rem; opacity: 0.9; }}
 .navbar .nav-btn {{ background: var(--mtp-accent); padding: 8px 20px; border-radius: 6px; font-size: 0.85rem; }}
 
 /* Hero */
-.hero {{ background: var(--brand-primary); color: #fff; padding: 120px 2rem 60px; text-align: center; }}
+.hero {{ background: var(--brand-primary); color: var(--hero-text); padding: 120px 2rem 60px; text-align: center; }}
 .hero h1 {{ font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem; }}
 .hero p {{ font-size: 1.15rem; opacity: 0.9; max-width: 700px; margin: 0 auto 2rem; }}
 
@@ -861,15 +877,15 @@ h2 {{ color: var(--brand-primary); text-align: center; font-size: 2rem; margin-b
 
 /* Tariffs */
 .tariff-table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; background: #fff; border-radius: 8px; overflow: hidden; }}
-.tariff-table th {{ background: var(--brand-primary); color: #fff; padding: 12px 16px; text-align: left; font-size: 0.9rem; }}
+.tariff-table th {{ background: var(--brand-primary); color: var(--hero-text); padding: 12px 16px; text-align: left; font-size: 0.9rem; }}
 .tariff-table td {{ padding: 10px 16px; border-bottom: 1px solid #eee; font-size: 0.95rem; }}
 .tariff-table td:last-child {{ text-align: right; font-weight: 600; color: var(--brand-primary); }}
 .tariff-table tr:nth-child(even) {{ background: var(--neutral-bg); }}
 .tariff-table tr.total-row {{ background: #e8f0fe; font-weight: 700; }}
 
 /* CTA */
-.cta-section {{ background: var(--brand-primary); padding: 60px 2rem; text-align: center; color: #fff; }}
-.cta-section h2 {{ color: #fff; }}
+.cta-section {{ background: var(--brand-primary); padding: 60px 2rem; text-align: center; color: var(--hero-text); }}
+.cta-section h2 {{ color: var(--hero-text); }}
 .cta-section p {{ font-size: 1.1rem; opacity: 0.9; margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto; }}
 
 /* Footer */

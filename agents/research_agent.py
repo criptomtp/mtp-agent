@@ -271,7 +271,9 @@ class ResearchAgent:
                     logger.warning(f"[ResearchAgent] Channel {channel} failed: {e}")
 
         # Deduplicate against existing leads in DB
+        logger.info(f"[Research] Before DB dedup: {len(leads)} leads")
         leads = self._filter_already_contacted(leads)
+        logger.info(f"[Research] After DB dedup: {len(leads)} leads")
 
         # After dedup, if not enough — try extra English query
         if len(leads) < count:
@@ -282,7 +284,9 @@ class ResearchAgent:
                     if len(leads) >= count * 2:
                         break
                     _add_lead(lead)
+                logger.info(f"[Research] Before English fallback dedup: {len(leads)} leads")
                 leads = self._filter_already_contacted(leads)
+                logger.info(f"[Research] After English fallback dedup: {len(leads)} leads")
             except Exception as e:
                 logger.warning(f"[ResearchAgent] English fallback failed: {e}")
 
@@ -291,14 +295,18 @@ class ResearchAgent:
             logger.info(f"[ResearchAgent] Scrapers returned {len(leads)}/{count}, using Gemini fallback for '{niche}'")
             try:
                 gemini_leads = self._generate_leads_gemini(count - len(leads), niche)
+                logger.info(f"[Research] Before Gemini fallback dedup: {len(gemini_leads)} leads")
                 gemini_leads = self._filter_already_contacted(gemini_leads)
+                logger.info(f"[Research] After Gemini fallback dedup: {len(gemini_leads)} leads")
                 _add_leads(gemini_leads)
             except Exception as e:
                 logger.warning(f"[ResearchAgent] Gemini fallback failed: {e}")
 
         # Static fallback only if still short
         if len(leads) < count:
+            logger.info(f"[Research] Before static fallback dedup: {len(self.FALLBACK_LEADS)} fallback leads")
             fallback_pool = self._filter_already_contacted(list(self.FALLBACK_LEADS))
+            logger.info(f"[Research] After static fallback dedup: {len(fallback_pool)} fallback leads")
             random.shuffle(fallback_pool)
             for lead in fallback_pool:
                 if len(leads) >= count:
