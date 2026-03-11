@@ -69,7 +69,7 @@ class ContentAgent:
         safe_name = re.sub(r"[^\w\s-]", "", lead.name).strip().replace(" ", "_")[:50]
         pptx_path = os.path.join(output_dir, f"{safe_name}_proposal.pptx")
 
-        html = self._generate_html_proposal(lead, analysis, tariffs)
+        html = self._generate_html_proposal(lead, analysis, tariffs, brand_style=brand_style)
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html)
         logger.info(f"HTML presentation saved: {html_path}")
@@ -402,7 +402,7 @@ img { max-width: 100% !important; height: auto !important; }
         try:
             from backend.services.database import get_supabase_admin
 
-            html = self._generate_html_proposal(lead, analysis, tariffs)
+            html = self._generate_html_proposal(lead, analysis, tariffs, brand_style=brand_style)
             slug = hashlib.md5(f"{lead.name}-fallback-{datetime.now().isoformat()}".encode()).hexdigest()[:12]
             api_base = os.getenv("MTP_API_URL", "https://mtp-agent-production.up.railway.app")
 
@@ -711,74 +711,54 @@ img { max-width: 100% !important; height: auto !important; }
 
         return prs
 
-    def _generate_html_proposal(self, lead: Lead, analysis: Dict[str, Any], tariffs=None) -> str:
-        """Generate HTML string for the commercial proposal."""
-        primary = "#1a1a2e"
-        # Try to use a brand color from website scraping (stored in analysis metadata)
-        # Default to dark blue if not available
+    def _generate_html_proposal(self, lead: Lead, analysis: Dict[str, Any], tariffs=None,
+                                brand_style=None) -> str:
+        """Generate HTML string for the commercial proposal (modern web design)."""
+        from .knowledge_base import MTP_COMPANY, MTP_CLIENTS, get_clients_text
+
+        bs = brand_style or {}
+        brand_primary = bs.get("primary_color", "#0f172a")
+        brand_secondary = bs.get("secondary_color", "#1e40af")
+        mtp_accent = "#E53E3E"
 
         hook = _escape_html(analysis.get("hook", f"{lead.name}: час масштабуватись"))
         client_insight = _escape_html(analysis.get("client_insight", ""))
         mtp_fit = _escape_html(analysis.get("mtp_fit", ""))
         zoom_cta = _escape_html(analysis.get("zoom_cta", "Запишіться на безкоштовну Zoom-консультацію!"))
-        date_str = datetime.now().strftime("%d.%m.%Y")
         client_name = _escape_html(lead.name)
+        calendly_url = MTP_COMPANY.get("calendly", "https://calendly.com/mtp-fulfillment")
 
         # Pain points HTML
-        pain_points = analysis.get("pain_points", [])
         pains_html = ""
-        for p in pain_points:
+        for p in analysis.get("pain_points", []):
             if isinstance(p, dict):
                 title = _escape_html(p.get("title", ""))
                 desc = _escape_html(p.get("description", ""))
-                pains_html += f"""
-                <div class="pain-item">
-                    <div class="pain-icon">&#9679;</div>
-                    <div>
-                        <div class="pain-title">{title}</div>
-                        <div class="pain-desc">{desc}</div>
-                    </div>
-                </div>"""
+                pains_html += f'<div class="pain-card"><h3>{title}</h3><p>{desc}</p></div>'
             else:
-                pains_html += f"""
-                <div class="pain-item">
-                    <div class="pain-icon">&#9679;</div>
-                    <div class="pain-desc">{_escape_html(str(p))}</div>
-                </div>"""
+                pains_html += f'<div class="pain-card"><p>{_escape_html(str(p))}</p></div>'
 
         # Key benefits HTML
-        key_benefits = analysis.get("key_benefits", [])
         benefits_html = ""
-        for kb in key_benefits:
+        for kb in analysis.get("key_benefits", []):
             if isinstance(kb, dict):
                 benefit = _escape_html(kb.get("benefit", ""))
                 proof = _escape_html(kb.get("proof", ""))
-                benefits_html += f"""
-                <div class="benefit-card">
-                    <div class="benefit-title">{benefit}</div>
-                    <div class="benefit-proof">{proof}</div>
-                </div>"""
+                benefits_html += f'<div class="benefit-card"><h3>{benefit}</h3><p>{proof}</p></div>'
             else:
-                benefits_html += f"""
-                <div class="benefit-card">
-                    <div class="benefit-title">{_escape_html(str(kb))}</div>
-                </div>"""
+                benefits_html += f'<div class="benefit-card"><h3>{_escape_html(str(kb))}</h3></div>'
 
         # Tariffs table rows
         tariff_rows = _build_tariffs_rows(tariffs)
         tariffs_html = ""
-        for i, (name, price) in enumerate(tariff_rows):
-            tariffs_html += f"""
-            <tr>
-                <td>{_escape_html(name)}</td>
-                <td>{_escape_html(price)}</td>
-            </tr>"""
+        for name, price in tariff_rows:
+            tariffs_html += f"<tr><td>{_escape_html(name)}</td><td>{_escape_html(price)}</td></tr>"
 
         # Pricing estimate
-        pricing = analysis.get("pricing_estimate", {})
         pricing_html = ""
+        pricing = analysis.get("pricing_estimate", {})
         if pricing:
-            pricing_html = '<div class="section-title">Орієнтовний кошторис</div><table class="pricing-table">'
+            pricing_html = '<h2>Орієнтовний кошторис</h2><table class="tariff-table">'
             items = list(pricing.items())
             for i, (key, val) in enumerate(items):
                 label = key.replace("_", " ").capitalize()
@@ -786,260 +766,167 @@ img { max-width: 100% !important; height: auto !important; }
                 pricing_html += f"<tr{cls}><td>{_escape_html(label)}</td><td>{_escape_html(str(val))}</td></tr>"
             pricing_html += "</table>"
 
-        # MTP fit section
-        mtp_fit_html = f"<p>{mtp_fit}</p>" if mtp_fit else ""
+        # Clients references
+        clients_html = ""
+        for c in MTP_CLIENTS:
+            clients_html += f'<a href="{c.get("url","#")}" target="_blank" class="client-logo">{_escape_html(c.get("name",""))}</a>'
 
         html = f"""<!DOCTYPE html>
-<html>
+<html lang="uk">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>Комерційна Пропозиція для {client_name} від MTP Fulfillment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+:root {{
+  --brand-primary: {brand_primary};
+  --brand-secondary: {brand_secondary};
+  --mtp-accent: {mtp_accent};
+  --text-dark: #333;
+  --text-light: #f8f8f8;
+  --neutral-bg: #f5f5f5;
+}}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: 'Inter', sans-serif; line-height: 1.6; color: var(--text-dark); background: #fff; }}
+a {{ color: var(--brand-secondary); text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+h2 {{ color: var(--brand-primary); text-align: center; font-size: 2rem; margin-bottom: 2rem; }}
+.container {{ max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }}
+.btn {{ display: inline-block; padding: 14px 32px; background: var(--mtp-accent); color: #fff; border: none;
+  border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.2s;
+  white-space: nowrap; max-width: 100%; text-overflow: ellipsis; }}
+.btn:hover {{ transform: translateY(-2px); text-decoration: none; }}
 
-  @page {{
-    size: A4;
-    margin: 0;
-  }}
+/* Navbar */
+.navbar {{ position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: var(--brand-primary);
+  padding: 0 2rem; height: 64px; display: flex; align-items: center; justify-content: space-between; }}
+.navbar a {{ color: #fff; font-weight: 600; }}
+.navbar .nav-logo {{ font-size: 1.1rem; letter-spacing: 1px; }}
+.navbar .nav-actions {{ display: flex; align-items: center; gap: 1.5rem; }}
+.navbar .nav-actions a {{ font-size: 0.9rem; opacity: 0.9; }}
+.navbar .nav-btn {{ background: var(--mtp-accent); padding: 8px 20px; border-radius: 6px; font-size: 0.85rem; }}
 
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+/* Hero */
+.hero {{ background: var(--brand-primary); color: #fff; padding: 120px 2rem 60px; text-align: center; }}
+.hero h1 {{ font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem; }}
+.hero p {{ font-size: 1.15rem; opacity: 0.9; max-width: 700px; margin: 0 auto 2rem; }}
 
-  body {{
-    font-family: 'Inter', 'DejaVu Sans', sans-serif;
-    background: #ffffff;
-    color: #1a1a1a;
-    width: 210mm;
-    min-height: 297mm;
-    padding: 0;
-    font-size: 13px;
-    line-height: 1.5;
-  }}
+/* Sections */
+.section {{ padding: 60px 0; }}
+.section-alt {{ background: var(--neutral-bg); }}
+.section-dark {{ background: var(--brand-secondary); color: var(--text-light); }}
+.section-dark h2 {{ color: var(--text-light); }}
 
-  /* HEADER */
-  .header {{
-    background: {primary};
-    color: white;
-    padding: 40px 50px 30px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-  }}
-  .header-left .company {{
-    font-size: 13px;
-    opacity: 0.7;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-  }}
-  .header-left .client {{
-    font-size: 28px;
-    font-weight: 900;
-    margin-top: 8px;
-  }}
-  .header-right {{
-    text-align: right;
-    font-size: 12px;
-    opacity: 0.7;
-  }}
+/* Pain cards */
+.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }}
+.pain-card {{ background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  border-top: 4px solid var(--mtp-accent); }}
+.pain-card h3 {{ font-size: 1.05rem; margin-bottom: 0.5rem; color: var(--text-dark); }}
+.pain-card p {{ font-size: 0.95rem; color: #555; }}
 
-  /* HOOK */
-  .hook-section {{
-    background: #f8f9fa;
-    padding: 35px 50px;
-    border-left: 5px solid {primary};
-  }}
-  .hook-text {{
-    font-size: 22px;
-    font-weight: 700;
-    line-height: 1.4;
-    color: #1a1a1a;
-  }}
+/* Benefit cards */
+.benefit-card {{ background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  border-left: 4px solid var(--brand-primary); }}
+.benefit-card h3 {{ font-size: 1.05rem; margin-bottom: 0.5rem; color: var(--brand-primary); }}
+.benefit-card p {{ font-size: 0.9rem; color: #666; font-style: italic; }}
 
-  /* CONTENT */
-  .content {{
-    padding: 25px 50px 30px;
-  }}
+/* Social proof */
+.clients-row {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 2rem; margin-top: 1.5rem; }}
+.client-logo {{ background: rgba(255,255,255,0.15); padding: 12px 24px; border-radius: 8px;
+  font-weight: 600; font-size: 1rem; color: var(--text-light); }}
 
-  /* SECTION TITLE */
-  .section-title {{
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    color: #888;
-    margin-bottom: 15px;
-    margin-top: 25px;
-  }}
-  .section-title:first-child {{
-    margin-top: 0;
-  }}
+/* Tariffs */
+.tariff-table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; background: #fff; border-radius: 8px; overflow: hidden; }}
+.tariff-table th {{ background: var(--brand-primary); color: #fff; padding: 12px 16px; text-align: left; font-size: 0.9rem; }}
+.tariff-table td {{ padding: 10px 16px; border-bottom: 1px solid #eee; font-size: 0.95rem; }}
+.tariff-table td:last-child {{ text-align: right; font-weight: 600; color: var(--brand-primary); }}
+.tariff-table tr:nth-child(even) {{ background: var(--neutral-bg); }}
+.tariff-table tr.total-row {{ background: #e8f0fe; font-weight: 700; }}
 
-  .insight {{
-    font-size: 14px;
-    color: #333;
-    line-height: 1.6;
-    margin-bottom: 5px;
-  }}
+/* CTA */
+.cta-section {{ background: var(--brand-primary); padding: 60px 2rem; text-align: center; color: #fff; }}
+.cta-section h2 {{ color: #fff; }}
+.cta-section p {{ font-size: 1.1rem; opacity: 0.9; margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto; }}
 
-  /* PAIN POINTS */
-  .pain-item {{
-    display: flex;
-    gap: 15px;
-    margin-bottom: 12px;
-    align-items: flex-start;
-  }}
-  .pain-icon {{
-    color: {primary};
-    font-size: 10px;
-    margin-top: 4px;
-    flex-shrink: 0;
-  }}
-  .pain-title {{
-    font-weight: 600;
-    font-size: 14px;
-  }}
-  .pain-desc {{
-    font-size: 13px;
-    color: #555;
-    margin-top: 3px;
-    line-height: 1.5;
-  }}
+/* Footer */
+.footer {{ background: #0d1b2a; color: #aaa; padding: 40px 2rem; text-align: center; font-size: 0.85rem; }}
+.footer a {{ color: #ddd; }}
+.footer .footer-contacts {{ margin-bottom: 1rem; font-size: 0.95rem; color: #ccc; }}
 
-  /* BENEFITS */
-  .benefits-grid {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 10px;
-  }}
-  .benefit-card {{
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 15px;
-    border-left: 3px solid {primary};
-  }}
-  .benefit-title {{
-    font-weight: 600;
-    font-size: 13px;
-  }}
-  .benefit-proof {{
-    font-size: 12px;
-    color: #666;
-    margin-top: 4px;
-    font-style: italic;
-  }}
-
-  /* TARIFFS TABLE */
-  .pricing-table {{
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 10px;
-    font-size: 13px;
-  }}
-  .pricing-table tr:nth-child(even) {{
-    background: #f8f9fa;
-  }}
-  .pricing-table td {{
-    padding: 8px 12px;
-    border-bottom: 1px solid #eee;
-  }}
-  .pricing-table td:last-child {{
-    text-align: right;
-    font-weight: 600;
-    color: {primary};
-  }}
-  .pricing-table tr.total-row {{
-    background: #e8f0fe;
-    font-weight: 700;
-  }}
-
-  /* CTA */
-  .cta-section {{
-    background: {primary};
-    color: white;
-    padding: 25px 50px;
-    margin-top: 20px;
-    text-align: center;
-  }}
-  .cta-text {{
-    font-size: 16px;
-    font-weight: 700;
-    line-height: 1.5;
-  }}
-
-  /* FOOTER */
-  .footer {{
-    padding: 20px 50px;
-    text-align: center;
-    font-size: 12px;
-    color: #888;
-    border-top: 1px solid #eee;
-  }}
-  .footer .contacts {{
-    font-size: 13px;
-    color: #444;
-    margin-bottom: 8px;
-  }}
-
-  /* ── Mobile overrides ── */
-  @media (max-width: 768px) {{
-    body {{ width: 100%; padding: 0; font-size: 14px; }}
-    .header {{ padding: 24px 20px 18px; flex-direction: column; gap: 8px; }}
-    .header-left .client {{ font-size: 20px; }}
-    .hook-section {{ padding: 20px; }}
-    .hook-text {{ font-size: 17px; }}
-    .content {{ padding: 16px 20px 20px; }}
-    .benefits-grid {{ grid-template-columns: 1fr; }}
-    .pricing-table {{ font-size: 12px; }}
-    .pricing-table td {{ padding: 6px 8px; }}
-    .cta-section {{ padding: 18px 20px; }}
-    .footer {{ padding: 14px 20px; }}
-  }}
+/* Mobile */
+@media (max-width: 768px) {{
+  .hero {{ padding: 100px 1rem 40px; }}
+  .hero h1 {{ font-size: 1.6rem; }}
+  .hero p {{ font-size: 1rem; }}
+  h2 {{ font-size: 1.5rem; }}
+  .grid {{ grid-template-columns: 1fr; }}
+  .navbar .nav-actions {{ gap: 0.8rem; }}
+  .navbar .nav-actions a:not(.nav-btn) {{ display: none; }}
+  .section {{ padding: 40px 0; }}
+}}
+@media (max-width: 480px) {{
+  .navbar {{ padding: 0 1rem; }}
+  .navbar .nav-btn {{ padding: 6px 14px; font-size: 0.8rem; }}
+  .hero h1 {{ font-size: 1.3rem; }}
+  .tariff-table td, .tariff-table th {{ padding: 8px 10px; font-size: 0.85rem; }}
+}}
 </style>
 </head>
 <body>
 
-  <div class="header">
-    <div class="header-left">
-      <div class="company">MTP Fulfillment</div>
-      <div class="client">{client_name}</div>
-    </div>
-    <div class="header-right">
-      Комерційна пропозиція<br>
-      {date_str}
-    </div>
+<nav class="navbar">
+  <a href="{MTP_COMPANY.get('website','#')}" target="_blank" class="nav-logo">MTP Fulfillment</a>
+  <div class="nav-actions">
+    <a href="tel:{MTP_COMPANY.get('phone_raw','')}">{MTP_COMPANY.get('phone','')}</a>
+    <a href="{calendly_url}" target="_blank" class="nav-btn btn">Записатись</a>
   </div>
+</nav>
 
-  <div class="hook-section">
-    <div class="hook-text">{hook}</div>
+<section class="hero">
+  <h1>{hook}</h1>
+  {"<p>" + client_insight + "</p>" if client_insight else ""}
+  <a href="{calendly_url}" target="_blank" class="btn">Обговорити на Zoom</a>
+</section>
+
+{"<section class='section section-alt'><div class='container'><h2>Виклики вашого бізнесу</h2><div class='grid'>" + pains_html + "</div></div></section>" if pains_html else ""}
+
+{"<section class='section'><div class='container'><h2>Чому MTP Fulfillment</h2><p style=\"text-align:center;max-width:700px;margin:0 auto 2rem;font-size:1.05rem;color:#555\">" + mtp_fit + "</p><div class='grid'>" + benefits_html + "</div></div></section>" if benefits_html else ""}
+
+<section class="section section-dark">
+  <div class="container">
+    <h2>Нам довіряють</h2>
+    <p style="text-align:center;opacity:0.8;margin-bottom:1rem">{MTP_COMPANY.get('years','7+')} років на ринку &bull; {MTP_COMPANY.get('shipments_per_month','60 000+')} відправок/міс</p>
+    <div class="clients-row">{clients_html}</div>
   </div>
+</section>
 
-  <div class="content">
-    {"<div class='section-title'>Ми розуміємо вашу специфіку</div><p class='insight'>" + client_insight + "</p>" if client_insight else ""}
-
-    {"<div class='section-title'>Де зазвичай втрачається ефективність</div>" + pains_html if pains_html else ""}
-
-    {"<div class='section-title'>Чому МТП</div>" + mtp_fit_html if mtp_fit else ""}
-
-    {"<div class='section-title'>Ключові переваги</div><div class='benefits-grid'>" + benefits_html + "</div>" if benefits_html else ""}
-
-    <div class="section-title">Тарифи MTP Fulfillment</div>
-    <table class="pricing-table">
+<section class="section section-alt">
+  <div class="container">
+    <h2>Тарифи</h2>
+    <table class="tariff-table">
+      <tr><th>Послуга</th><th style="text-align:right">Ціна</th></tr>
       {tariffs_html}
     </table>
-
     {pricing_html}
   </div>
+</section>
 
-  <div class="cta-section">
-    <div class="cta-text">{zoom_cta}</div>
-  </div>
+<section class="cta-section">
+  <h2>Готові масштабуватись?</h2>
+  <p>{zoom_cta}</p>
+  <a href="{calendly_url}" target="_blank" class="btn" style="font-size:1.1rem;padding:16px 40px">Записатись на Zoom</a>
+</section>
 
-  <div class="footer">
-    <div class="contacts">
-      mtpgrouppromo@gmail.com &nbsp;|&nbsp; +38 (050) 144-46-45 &nbsp;|&nbsp; fulfillmentmtp.com.ua &nbsp;|&nbsp; @nikolay_mtp
-    </div>
-    MTP Fulfillment — 7+ років на ринку, 60 000+ відправок на місяць
+<footer class="footer">
+  <div class="footer-contacts">
+    <a href="mailto:{MTP_COMPANY.get('email','')}">{MTP_COMPANY.get('email','')}</a> &nbsp;|&nbsp;
+    <a href="tel:{MTP_COMPANY.get('phone_raw','')}">{MTP_COMPANY.get('phone','')}</a> &nbsp;|&nbsp;
+    <a href="{MTP_COMPANY.get('website','')}" target="_blank">{MTP_COMPANY.get('website','')}</a>
   </div>
+  &copy; 2026 MTP Fulfillment. Всі права захищені.
+</footer>
 
 </body>
 </html>"""
