@@ -822,7 +822,7 @@ img { max-width: 100% !important; height: auto !important; }
   --brand-secondary: {brand_secondary};
   --mtp-accent: {mtp_accent};
   --hero-text: {hero_text_color};
-  --text-dark: #333;
+  --text-dark: #1a1a1a;
   --text-light: #f8f8f8;
   --neutral-bg: #f5f5f5;
 }}
@@ -831,6 +831,7 @@ body {{ font-family: 'Inter', sans-serif; line-height: 1.6; color: var(--text-da
 a {{ color: var(--brand-secondary); text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
 h2 {{ color: var(--brand-primary); text-align: center; font-size: 2rem; margin-bottom: 2rem; }}
+section:not(.hero):not(.cta-section) h2 {{ color: var(--text-dark) !important; }}
 .container {{ max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }}
 .btn {{ display: inline-block; padding: 14px 32px; background: var(--mtp-accent); color: #fff; border: none;
   border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.2s;

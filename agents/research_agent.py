@@ -45,6 +45,28 @@ def _normalize_name(name: str) -> str:
     return name
 
 
+BAD_TITLES = {
+    'контакти', 'товари', 'послуги', 'ціни', 'головна', 'index',
+    'home', 'main', 'shop', 'store', 'каталог', 'catalog',
+    'контакти, товари, послуги, ціни', 'інтернет-магазин', 'інтернет магазин',
+    'купити', 'buy', 'welcome', 'вітаємо',
+}
+
+
+def _is_bad_title(name: str) -> bool:
+    """Check if a lead name is too generic to be useful."""
+    if not name or len(name) < 3:
+        return True
+    name_lower = name.lower().strip()
+    if name_lower in BAD_TITLES:
+        return True
+    # Just comma-separated generic words
+    parts = [p.strip().lower() for p in name_lower.split(',')]
+    if len(parts) > 1 and all(p in BAD_TITLES for p in parts):
+        return True
+    return False
+
+
 def clean_company_name(name: str, website: str = "") -> str:
     """Обрізає довгі назви компаній до читабельної форми."""
     if len(name) <= 80:
@@ -541,6 +563,11 @@ class ResearchAgent:
                     self._scrape_contact_from_website(lead)
                     lead.contact_source = "website" if (lead.email or lead.phone) else "manual_needed"
 
+                    # Skip leads with still-bad names after scraping
+                    if _is_bad_title(lead.name):
+                        logger.info(f"[Research] Skipping lead with bad title: '{lead.name}' ({website_url})")
+                        continue
+
                     leads.append(lead)
 
             except Exception as e:
@@ -645,6 +672,10 @@ class ResearchAgent:
                     # Enrich from website
                     self._scrape_contact_from_website(lead)
                     lead.contact_source = "website" if (lead.email or lead.phone) else "manual_needed"
+
+                    if _is_bad_title(lead.name):
+                        logger.info(f"[Research] Skipping lead with bad title: '{lead.name}' ({site_url})")
+                        continue
 
                     leads.append(lead)
 
@@ -944,6 +975,7 @@ class ResearchAgent:
             ]
             pages_to_check = [base_url] + [base_origin + p for p in CONTACT_PATHS]
 
+            name_fixed = False
             for page_url in pages_to_check:
                 if lead.email and lead.phone:
                     break  # Already have both — stop crawling
@@ -954,6 +986,34 @@ class ResearchAgent:
                         continue
                     html = resp.text
                     self._extract_contacts_from_html(lead, html)
+
+                    # Fix bad lead name from main page HTML
+                    if not name_fixed and _is_bad_title(lead.name):
+                        soup = BeautifulSoup(html, "lxml")
+                        new_name = ""
+                        # Try og:site_name first
+                        og_site = soup.find("meta", property="og:site_name")
+                        if og_site and og_site.get("content", "").strip():
+                            new_name = og_site["content"].strip()
+                        # Try og:title
+                        if not new_name or _is_bad_title(new_name):
+                            og_title = soup.find("meta", property="og:title")
+                            if og_title and og_title.get("content", "").strip():
+                                new_name = og_title["content"].strip()
+                        # Try h1
+                        if not new_name or _is_bad_title(new_name):
+                            h1 = soup.find("h1")
+                            if h1 and h1.get_text(strip=True):
+                                new_name = h1.get_text(strip=True)
+                        if new_name and not _is_bad_title(new_name):
+                            new_name = clean_company_name(
+                                new_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip(),
+                                website=lead.website,
+                            )
+                            if not _is_bad_title(new_name):
+                                logger.info(f"[Research] Fixed bad name '{lead.name}' → '{new_name}'")
+                                lead.name = new_name
+                        name_fixed = True
                 except Exception:
                     continue
 
@@ -1376,6 +1436,11 @@ class ResearchAgent:
                         source="google_search",
                     )
                     self._scrape_contact_from_website(lead)
+
+                    if _is_bad_title(lead.name):
+                        logger.info(f"[Research] Skipping lead with bad title: '{lead.name}' ({link})")
+                        continue
+
                     leads.append(lead)
 
                     if len(leads) >= count:
