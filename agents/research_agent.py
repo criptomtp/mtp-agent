@@ -71,19 +71,48 @@ def _is_bad_title(name: str) -> bool:
 
 
 def clean_company_name(name: str, website: str = "") -> str:
-    """Обрізає довгі назви компаній до читабельної форми."""
-    if len(name) <= 80:
-        result = name
-    else:
-        result = name
-        for sep in [",", "(", "\u2014", " - ", " | "]:
-            if sep in name:
-                result = name.split(sep)[0].strip()
-                break
-        else:
-            result = name[:80].strip()
+    """Extract clean brand name from page title."""
+    if not name:
+        return name
 
-    # Fallback to domain if name is too short or ends abruptly
+    GENERIC_KEYWORDS = [
+        'оптом', 'дропшипінг', 'купити', 'магазин', 'інтернет',
+        'shop', 'store', 'онлайн', 'online', '2024', '2025', '2026',
+    ]
+
+    # Split by common separators and take the shortest meaningful part
+    # "Жіночий одяг оптом 2026, дропшипінг | Lurex" → prefer "Lurex"
+    for sep in [' | ', ' - ', ' — ', ' :: ', ' / ']:
+        parts = name.split(sep)
+        if len(parts) > 1:
+            def _is_brand_like(part):
+                p = part.strip().lower()
+                generic_count = sum(1 for kw in GENERIC_KEYWORDS if kw in p)
+                return generic_count == 0 and len(part.strip()) <= 30
+
+            brand_parts = [p.strip() for p in parts if p.strip() and _is_brand_like(p.strip())]
+            if brand_parts:
+                result = min(brand_parts, key=len)
+            else:
+                parts_stripped = [p.strip() for p in parts if p.strip()]
+                result = min(parts_stripped, key=len)
+
+            # Fallback to domain if result is too short
+            bad_endings = ("чи", "та", "або", "для", "хл", "дл", "ін", "пр", "ко", "за", "на", "по")
+            if len(result) < 5 or result.endswith(bad_endings):
+                if website:
+                    from urllib.parse import urlparse
+                    try:
+                        domain = urlparse(website).netloc.replace("www.", "")
+                        if domain:
+                            result = domain
+                    except Exception:
+                        pass
+            return result
+
+    # No separator found — truncate if too long
+    result = name.strip() if len(name) <= 80 else name[:80].strip()
+
     bad_endings = ("чи", "та", "або", "для", "хл", "дл", "ін", "пр", "ко", "за", "на", "по")
     if len(result) < 5 or result.endswith(bad_endings):
         if website:
@@ -1006,33 +1035,35 @@ class ResearchAgent:
                     html = resp.text
                     self._extract_contacts_from_html(lead, html)
 
-                    # Fix bad lead name from main page HTML
-                    if not name_fixed and _is_bad_title(lead.name):
+                    # Fix lead name from main page HTML
+                    if not name_fixed:
                         soup = BeautifulSoup(html, "lxml")
-                        new_name = ""
-                        # Try og:site_name first
+
+                        # Prefer og:site_name — cleanest brand name source
                         og_site = soup.find("meta", property="og:site_name")
                         if og_site and og_site.get("content", "").strip():
-                            new_name = og_site["content"].strip()
-                        # Try og:title
-                        if not new_name or _is_bad_title(new_name):
+                            candidate = og_site["content"].strip()
+                            if not _is_bad_title(candidate) and len(candidate) < 50:
+                                logger.info(f"[Research] og:site_name '{candidate}' for '{lead.name}'")
+                                lead.name = candidate
+                                name_fixed = True
+
+                        # If still bad — try og:title, h1
+                        if not name_fixed and _is_bad_title(lead.name):
+                            new_name = ""
                             og_title = soup.find("meta", property="og:title")
                             if og_title and og_title.get("content", "").strip():
                                 new_name = og_title["content"].strip()
-                        # Try h1
-                        if not new_name or _is_bad_title(new_name):
-                            h1 = soup.find("h1")
-                            if h1 and h1.get_text(strip=True):
-                                new_name = h1.get_text(strip=True)
-                        if new_name and not _is_bad_title(new_name):
-                            new_name = clean_company_name(
-                                new_name.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip(),
-                                website=lead.website,
-                            )
-                            if not _is_bad_title(new_name):
-                                logger.info(f"[Research] Fixed bad name '{lead.name}' → '{new_name}'")
-                                lead.name = new_name
-                        name_fixed = True
+                            if not new_name or _is_bad_title(new_name):
+                                h1 = soup.find("h1")
+                                if h1 and h1.get_text(strip=True):
+                                    new_name = h1.get_text(strip=True)
+                            if new_name and not _is_bad_title(new_name):
+                                new_name = clean_company_name(new_name, website=lead.website)
+                                if not _is_bad_title(new_name):
+                                    logger.info(f"[Research] Fixed bad name '{lead.name}' → '{new_name}'")
+                                    lead.name = new_name
+                            name_fixed = True
                 except Exception:
                     continue
 
