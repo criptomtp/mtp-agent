@@ -32,7 +32,8 @@ class Lead:
     contact_source: str = ""
     extra_phones: str = ""
     social_media: str = ""  # JSON string: {"instagram": "url", ...}
-    instagram_followers: int = 0
+    instagram_followers: Optional[int] = None
+    instagram_following: Optional[int] = None
 
 
 def _normalize_name(name: str) -> str:
@@ -938,12 +939,20 @@ class ResearchAgent:
                     lead.contact_source = "instagram_bio"
                 if ig_data.get("followers"):
                     lead.instagram_followers = ig_data["followers"]
+                if ig_data.get("following_count") is not None:
+                    lead.instagram_following = ig_data["following_count"]
                 if ig_data.get("linktree_url"):
                     social["linktree"] = ig_data["linktree_url"]
-                    lead.social_media = _json.dumps(social, ensure_ascii=False)
+                if ig_data.get("bio_mentions"):
+                    social["related_account"] = ig_data["bio_mentions"][0]
+                lead.social_media = _json.dumps(social, ensure_ascii=False)
+
+                username = ig_url.rstrip("/").split("/")[-1].lstrip("@")
+                logger.info(f"Instagram @{username}: {ig_data.get('followers')} followers, {ig_data.get('following_count')} following")
 
                 # Owner/LPR detection: if following_count <= 50, likely a brand page
                 if ig_data.get("following_count", 999) <= 50:
+                    logger.info(f"Low following count ({ig_data['following_count']}) — searching for owner...")
                     username = ig_url.rstrip("/").split("/")[-1].lstrip("@")
                     owner_data = self._find_owner_via_google(lead.name, username)
                     if owner_data.get("owner_instagram"):
@@ -1021,6 +1030,12 @@ class ResearchAgent:
                 linktree_match = re.search(r"(https?://(?:linktr\.ee|taplink\.cc|t\.me)/\S+)", full_desc)
                 if linktree_match:
                     result["linktree_url"] = linktree_match.group(1)
+
+                # Find @mentions in bio (related accounts, often owner/PR)
+                mentions = re.findall(r'@([a-zA-Z0-9._]+)', full_desc)
+                mentions = [m for m in mentions if m.lower() != username.lower()]
+                if mentions:
+                    result["bio_mentions"] = mentions
 
             logger.debug(f"[ResearchAgent] Instagram @{username}: followers={result['followers']}, following={result['following_count']}, email={result['bio_email']}")
         except Exception as e:
