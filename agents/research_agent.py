@@ -247,8 +247,8 @@ class ResearchAgent:
                 _add_lead(lead)
 
         # Channel dispatch — order matters for priority
-        # Request 4x to account for dedup filtering
-        remaining = lambda: max(0, count * 4 - len(leads))
+        # Request 3x to account for dedup filtering
+        remaining = lambda: max(0, count * 3 - len(leads))
         channel_methods = {
             "serper": lambda: self._search_serper(remaining(), niche=niche),
             "google": lambda: self._search_google(remaining(), niche=niche),
@@ -277,7 +277,7 @@ class ResearchAgent:
         if len(leads) < count:
             logger.info(f"[Research] After dedup only {len(leads)}/{count}, trying English fallback")
             try:
-                extra = self._search_serper(count * 3, niche=f"{niche} shop Ukraine")
+                extra = self._search_serper(count * 2, niche=f"{niche} shop Ukraine")
                 for lead in extra:
                     if len(leads) >= count * 2:
                         break
@@ -927,25 +927,20 @@ class ResearchAgent:
             parsed_base = urlparse(base_url)
             base_origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
 
-            # Pages to check — main page + contact/cooperation pages
-            pages_to_check = [base_url]
+            # Pages to check — main page first, then most common contact pages
+            # Keep list short for speed; pipeline can do deeper scraping later
             CONTACT_PATHS = [
-                "/contact", "/contacts", "/контакти", "/kontakty", "/kontakti",
-                "/about", "/about-us", "/про-нас", "/pro-nas",
-                "/cooperation", "/співпраця", "/spivpratsya", "/partners", "/партнерам",
-                "/info", "/information", "/help", "/faq",
-                "/wholesale", "/opt", "/b2b", "/wholesale-buyers",
-                "/for-business", "/business", "/trade", "/корпоративним", "/бізнес",
-                "/оптом",
+                "/contacts", "/контакти", "/contact",
+                "/about", "/cooperation", "/співпраця",
+                "/b2b", "/wholesale", "/for-business",
             ]
-            for path in CONTACT_PATHS:
-                pages_to_check.append(base_origin + path)
+            pages_to_check = [base_url] + [base_origin + p for p in CONTACT_PATHS]
 
             for page_url in pages_to_check:
                 if lead.email and lead.phone:
-                    break  # Already have both
+                    break  # Already have both — stop crawling
                 try:
-                    resp = requests.get(page_url, headers=self.HEADERS, timeout=8,
+                    resp = requests.get(page_url, headers=self.HEADERS, timeout=5,
                                         allow_redirects=True)
                     if resp.status_code != 200:
                         continue
