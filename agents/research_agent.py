@@ -1,5 +1,7 @@
 """ResearchAgent — пошук потенційних клієнтів косметики."""
 
+import html as html_module
+import json as _json
 import os
 import re
 import random
@@ -30,6 +32,7 @@ class Lead:
     contact_source: str = ""
     extra_phones: str = ""
     social_media: str = ""  # JSON string: {"instagram": "url", ...}
+    instagram_followers: int = 0
 
 
 def _normalize_name(name: str) -> str:
@@ -919,9 +922,97 @@ class ResearchAgent:
         except Exception as e:
             logger.debug(f"[ResearchAgent] Website scrape failed for {lead.name}: {e}")
 
+        # ── Instagram bio scraping if we found an Instagram link ──
+        try:
+            social = {}
+            if lead.social_media and lead.social_media not in ("{}", "", "null"):
+                social = _json.loads(lead.social_media)
+            ig_url = social.get("instagram", "")
+            if ig_url:
+                ig_data = self._scrape_instagram_bio(ig_url)
+                if ig_data.get("bio_email") and not lead.email:
+                    lead.email = ig_data["bio_email"]
+                    lead.contact_source = "instagram_bio"
+                if ig_data.get("bio_phone") and not lead.phone:
+                    lead.phone = ig_data["bio_phone"]
+                    lead.contact_source = "instagram_bio"
+                if ig_data.get("followers"):
+                    lead.instagram_followers = ig_data["followers"]
+                if ig_data.get("linktree_url"):
+                    social["linktree"] = ig_data["linktree_url"]
+                    lead.social_media = _json.dumps(social, ensure_ascii=False)
+        except Exception as e:
+            logger.debug(f"[ResearchAgent] Instagram scrape failed for {lead.name}: {e}")
+
+    def _scrape_instagram_bio(self, instagram_url: str) -> dict:
+        """Scrape Instagram profile bio for contacts and follower count."""
+        result = {"followers": None, "bio_email": None, "bio_phone": None, "bio_text": "", "linktree_url": None}
+        try:
+            username = instagram_url.rstrip("/").split("/")[-1].lstrip("@")
+            if not username or username in ("p", "explore", "reel", "stories"):
+                return result
+
+            # Scrape profile page with Googlebot UA (more likely to get meta tags)
+            url = f"https://www.instagram.com/{username}/"
+            headers = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
+            resp = requests.get(url, headers=headers, timeout=10)
+            text = resp.text
+
+            # Extract followers from JSON
+            followers_match = re.search(r'"edge_followed_by":\s*\{\s*"count":\s*(\d+)\s*\}', text)
+            if followers_match:
+                result["followers"] = int(followers_match.group(1))
+
+            # Extract bio text from meta description
+            bio_match = re.search(r'<meta\s+property="og:description"\s+content="([^"]+)"', text)
+            if bio_match:
+                bio_text = html_module.unescape(bio_match.group(1))
+                result["bio_text"] = bio_text
+
+                # Extract email from bio
+                email_match = re.search(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", bio_text)
+                if email_match:
+                    result["bio_email"] = email_match.group(0)
+
+                # Extract phone from bio
+                phone_match = re.search(r"\+?3?8?\s*\(?0\d{2}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", bio_text)
+                if phone_match:
+                    raw = phone_match.group(0)
+                    digits = re.sub(r"[^\d]", "", raw)
+                    if digits.startswith("380") and len(digits) >= 12:
+                        result["bio_phone"] = f"+{digits[:12]}"
+                    elif digits.startswith("0") and len(digits) >= 10:
+                        result["bio_phone"] = f"+38{digits[:10]}"
+
+                # Extract linktree/taplink
+                linktree_match = re.search(r"(https?://(?:linktr\.ee|taplink\.cc|t\.me)/\S+)", bio_text)
+                if linktree_match:
+                    result["linktree_url"] = linktree_match.group(1)
+
+            logger.debug(f"[ResearchAgent] Instagram @{username}: followers={result['followers']}, email={result['bio_email']}")
+        except Exception as e:
+            logger.debug(f"[ResearchAgent] Instagram scrape failed for {instagram_url}: {e}")
+        return result
+
+    OFFLINE_KEYWORDS = {
+        "магазин", "відділення", "адреса", "офіс", "локація", "склад",
+        "location", "store", "address", "retail", "office", "branch",
+        "shop", "showroom", "точка видачі",
+    }
+
+    def _is_offline_context(self, tag) -> bool:
+        """Check if a tel: link's parent context suggests an offline/retail phone."""
+        parent = tag.find_parent(["div", "section", "li", "p", "span", "footer"])
+        if not parent:
+            return False
+        ctx = parent.get_text(separator=" ", strip=True).lower()[:200]
+        # Also check class names
+        cls = " ".join(parent.get("class", []))
+        combined = f"{ctx} {cls}".lower()
+        return any(kw in combined for kw in self.OFFLINE_KEYWORDS)
+
     def _extract_contacts_from_html(self, lead: Lead, html: str):
         """Extract all emails, phones, and social media from HTML."""
-        import json as _json
         from urllib.parse import unquote
 
         soup = BeautifulSoup(html, "lxml")
@@ -945,29 +1036,34 @@ class ResearchAgent:
         if not lead.email and all_emails:
             lead.email = all_emails[0]
 
-        # ── Collect ALL phones from tel: links ──
-        all_phones = []
+        # ── Collect ALL phones from tel: links with context ──
+        online_phones = []
+        offline_phones = []
         for tel in soup.select("[href^='tel:']"):
             raw = unquote(tel["href"].replace("tel:", "").strip())
-            digits = re.sub(r"[^\d+]", "", raw)
-            # Normalize to +380 format
-            clean_digits = re.sub(r"[^\d]", "", digits)
+            clean_digits = re.sub(r"[^\d]", "", raw)
             phone = None
             if clean_digits.startswith("380") and len(clean_digits) >= 12:
                 phone = f"+{clean_digits[:12]}"
             elif clean_digits.startswith("0") and len(clean_digits) >= 10:
                 phone = f"+38{clean_digits[:10]}"
-            if phone and phone not in all_phones and phone not in self.JUNK_PHONES and not self._is_junk_phone(phone):
-                all_phones.append(phone)
+            if not phone or phone in self.JUNK_PHONES or self._is_junk_phone(phone):
+                continue
+            if self._is_offline_context(tel):
+                if phone not in offline_phones:
+                    offline_phones.append(phone)
+            else:
+                if phone not in online_phones:
+                    online_phones.append(phone)
 
         # Regex fallback for phones
-        if len(all_phones) < 3:
-            phone_patterns = [
-                r"\+?38\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
-                r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",
-                r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",
-                r"\+38\s+0\d{2}[\s\-\(]*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
-            ]
+        phone_patterns = [
+            r"\+?38\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
+            r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",
+            r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",
+            r"\+38\s+0\d{2}[\s\-\(]*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
+        ]
+        if len(online_phones) + len(offline_phones) < 3:
             for pattern in phone_patterns:
                 for raw in re.findall(pattern, html):
                     clean_digits = re.sub(r"[^\d]", "", raw)
@@ -978,14 +1074,21 @@ class ResearchAgent:
                         phone = f"+{clean_digits[:12]}"
                     elif clean_digits.startswith("0") and len(clean_digits) >= 10:
                         phone = f"+38{clean_digits[:10]}"
-                    if phone and phone not in all_phones and phone not in self.JUNK_PHONES and not self._is_junk_phone(phone):
-                        all_phones.append(phone)
+                    if phone and phone not in online_phones and phone not in offline_phones \
+                            and phone not in self.JUNK_PHONES and not self._is_junk_phone(phone):
+                        online_phones.append(phone)
 
-        all_phones = all_phones[:3]
+        # Prioritize online phones; fallback to offline
+        if online_phones:
+            all_phones = online_phones[:3]
+        else:
+            all_phones = [f"offline:{p}" for p in offline_phones[:3]]
+
         if not lead.phone and all_phones:
-            lead.phone = all_phones[0]
+            first = all_phones[0]
+            lead.phone = first.replace("offline:", "") if first.startswith("offline:") else first
         # Store extra phones (beyond the first one)
-        extra = [p for p in all_phones if p != lead.phone]
+        extra = [p for p in all_phones if p.replace("offline:", "") != lead.phone]
         if extra:
             lead.extra_phones = ", ".join(extra)
 

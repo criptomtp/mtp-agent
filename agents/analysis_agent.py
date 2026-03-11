@@ -536,6 +536,12 @@ def score_lead(lead, analysis: dict) -> dict:
         score += 1
         reasons.append("Має сайт (+1)")
 
+    # Критерій 5: Великий Instagram (+1)
+    ig_followers = getattr(lead, "instagram_followers", 0) or 0
+    if ig_followers >= 10000:
+        score += 1
+        reasons.append(f"Instagram {ig_followers:,} підписників (+1)")
+
     # Фінальна оцінка (max = 10)
     score = min(score, 10)
 
