@@ -47,9 +47,8 @@ def _normalize_name(name: str) -> str:
 
 BAD_TITLES = {
     'контакти', 'товари', 'послуги', 'ціни', 'головна', 'index',
-    'home', 'main', 'shop', 'store', 'каталог', 'catalog',
-    'контакти, товари, послуги, ціни', 'інтернет-магазин', 'інтернет магазин',
-    'купити', 'buy', 'welcome', 'вітаємо',
+    'home', 'main', 'каталог', 'catalog', 'welcome', 'вітаємо',
+    'контакти, товари, послуги, ціни',
 }
 
 
@@ -58,11 +57,15 @@ def _is_bad_title(name: str) -> bool:
     if not name or len(name) < 3:
         return True
     name_lower = name.lower().strip()
+    # Exact match with bad title
     if name_lower in BAD_TITLES:
         return True
-    # Just comma-separated generic words
+    # All comma-separated parts are bad
     parts = [p.strip().lower() for p in name_lower.split(',')]
     if len(parts) > 1 and all(p in BAD_TITLES for p in parts):
+        return True
+    # Name is only numbers/symbols
+    if not re.search(r'[a-zA-Zа-яА-ЯіІїЇєЄ]{3,}', name):
         return True
     return False
 
