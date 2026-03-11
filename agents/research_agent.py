@@ -291,7 +291,14 @@ class ResearchAgent:
             method = channel_methods.get(channel)
             if method:
                 try:
-                    _add_leads(method())
+                    before = len(leads)
+                    raw = method()
+                    logger.info(f"[Research] Channel '{channel}': got {len(raw)} raw leads")
+                    for lead in raw:
+                        if len(leads) >= count * 3:
+                            break
+                        _add_lead(lead)
+                    logger.info(f"[Research] After channel '{channel}': total {len(leads)} (added {len(leads) - before})")
                 except Exception as e:
                     logger.warning(f"[ResearchAgent] Channel {channel} failed: {e}")
 
@@ -521,7 +528,12 @@ class ResearchAgent:
                 resp.raise_for_status()
                 data = resp.json()
 
-                for item in data.get("organic", []):
+                results = data.get("organic", [])
+                logger.info(f"[Serper] Query: '{query}', got {len(results)} organic results")
+                for r in results[:3]:
+                    logger.info(f"[Serper] Result: title='{r.get('title', '')}' link='{r.get('link', '')}'")
+
+                for item in results:
                     if len(leads) >= count:
                         break
 
@@ -964,6 +976,7 @@ class ResearchAgent:
         """Scrape email and phone from a company website + cooperation pages."""
         from urllib.parse import urlparse
 
+        logger.info(f"[Scrape] Processing: '{lead.name}' ({lead.website})")
         try:
             base_url = lead.website.rstrip("/")
             parsed_base = urlparse(base_url)
@@ -977,6 +990,9 @@ class ResearchAgent:
                 "/b2b", "/wholesale", "/for-business",
             ]
             pages_to_check = [base_url] + [base_origin + p for p in CONTACT_PATHS]
+
+            if _is_bad_title(lead.name):
+                logger.info(f"[Scrape] BAD TITLE: '{lead.name}' — trying to fix from page HTML...")
 
             name_fixed = False
             for page_url in pages_to_check:
