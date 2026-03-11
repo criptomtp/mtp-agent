@@ -234,6 +234,26 @@ def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any], n
         'Мета кожного аналізу — змусити власника бізнесу сказати: "Це написано саме про мене".'
     )
 
+    # Extract owner info from social_media if available
+    owner_section = ""
+    try:
+        social_data = {}
+        sm = getattr(lead, "social_media", "") or ""
+        if sm and sm not in ("{}", "null"):
+            import json as _json
+            social_data = _json.loads(sm)
+        owner_name = social_data.get("owner_name", "")
+        owner_ig = social_data.get("owner_instagram", "")
+        if owner_name or owner_ig:
+            owner_section = f"\n\n## Власник / ЛПР:\n"
+            if owner_name:
+                owner_section += f"Ім'я: {owner_name}\n"
+            if owner_ig:
+                owner_section += f"Instagram: {owner_ig}\n"
+            owner_section += "ВАЖЛИВО: використай ім'я власника в email_opening для особистого звернення."
+    except Exception:
+        pass
+
     user_prompt = f"""Проаналізуй компанію для персоналізованої комерційної пропозиції від MTP Fulfillment.
 
 ## Дані компанії:
@@ -243,6 +263,7 @@ def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any], n
 Опис: {lead.description}
 Кількість товарів: {lead.products_count}
 Джерело: {lead.source}
+{owner_section}
 
 ## Дані з сайту:
 {website_section}

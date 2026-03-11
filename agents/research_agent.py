@@ -941,12 +941,25 @@ class ResearchAgent:
                 if ig_data.get("linktree_url"):
                     social["linktree"] = ig_data["linktree_url"]
                     lead.social_media = _json.dumps(social, ensure_ascii=False)
+
+                # Owner/LPR detection: if following_count <= 20, likely a brand page
+                if ig_data.get("following_count", 999) <= 20:
+                    username = ig_url.rstrip("/").split("/")[-1].lstrip("@")
+                    owner_data = self._find_owner_via_google(lead.name, username)
+                    if owner_data.get("owner_instagram"):
+                        social["owner_instagram"] = owner_data["owner_instagram"]
+                    if owner_data.get("owner_name"):
+                        social["owner_name"] = owner_data["owner_name"]
+                    if owner_data.get("owner_email") and not lead.email:
+                        lead.email = owner_data["owner_email"]
+                        lead.contact_source = "owner_google"
+                    lead.social_media = _json.dumps(social, ensure_ascii=False)
         except Exception as e:
             logger.debug(f"[ResearchAgent] Instagram scrape failed for {lead.name}: {e}")
 
     def _scrape_instagram_bio(self, instagram_url: str) -> dict:
         """Scrape Instagram profile bio for contacts and follower count."""
-        result = {"followers": None, "bio_email": None, "bio_phone": None, "bio_text": "", "linktree_url": None}
+        result = {"followers": None, "following_count": None, "bio_email": None, "bio_phone": None, "bio_text": "", "linktree_url": None}
         try:
             username = instagram_url.rstrip("/").split("/")[-1].lstrip("@")
             if not username or username in ("p", "explore", "reel", "stories"):
@@ -984,14 +997,61 @@ class ResearchAgent:
                     elif digits.startswith("0") and len(digits) >= 10:
                         result["bio_phone"] = f"+38{digits[:10]}"
 
+                # Extract following count from bio description
+                following_match = re.search(r"(\d+)\s+(?:подписок|following|підписок)", bio_text, re.IGNORECASE)
+                if following_match:
+                    result["following_count"] = int(following_match.group(1))
+
                 # Extract linktree/taplink
                 linktree_match = re.search(r"(https?://(?:linktr\.ee|taplink\.cc|t\.me)/\S+)", bio_text)
                 if linktree_match:
                     result["linktree_url"] = linktree_match.group(1)
 
-            logger.debug(f"[ResearchAgent] Instagram @{username}: followers={result['followers']}, email={result['bio_email']}")
+            logger.debug(f"[ResearchAgent] Instagram @{username}: followers={result['followers']}, following={result['following_count']}, email={result['bio_email']}")
         except Exception as e:
             logger.debug(f"[ResearchAgent] Instagram scrape failed for {instagram_url}: {e}")
+        return result
+
+    def _find_owner_via_google(self, brand_name: str, instagram_username: str) -> dict:
+        """Try to find business owner's personal Instagram via Google/Serper search."""
+        result = {"owner_name": None, "owner_instagram": None, "owner_email": None}
+        api_key = self._api_keys.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY", "")
+        if not api_key:
+            return result
+        try:
+            queries = [
+                f'"{brand_name}" засновник власник instagram',
+                f'"{brand_name}" founder owner site:instagram.com',
+            ]
+            for query in queries:
+                resp = requests.post(
+                    "https://google.serper.dev/search",
+                    json={"q": query, "gl": "ua", "hl": "uk", "num": 5},
+                    headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+                    timeout=10,
+                )
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                for item in data.get("organic", []):
+                    link = item.get("link", "")
+                    snippet = item.get("snippet", "")
+                    title = item.get("title", "")
+                    # Personal Instagram profile (not the business one)
+                    if "instagram.com/" in link and instagram_username not in link:
+                        ig_user = link.rstrip("/").split("/")[-1]
+                        if ig_user and not any(c in ig_user for c in "?#="):
+                            result["owner_instagram"] = f"https://www.instagram.com/{ig_user}/"
+                            if "(@" in title:
+                                result["owner_name"] = title.split("(@")[0].strip()
+                    # Email in snippet
+                    email_m = re.search(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", snippet)
+                    if email_m and not result["owner_email"]:
+                        result["owner_email"] = email_m.group(0)
+                if result["owner_instagram"]:
+                    break
+        except Exception as e:
+            logger.debug(f"[ResearchAgent] Owner search failed for {brand_name}: {e}")
         return result
 
     OFFLINE_KEYWORDS = {
