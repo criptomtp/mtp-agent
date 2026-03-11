@@ -92,16 +92,21 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
         from agents.style_agent import StyleAgent
         style_agent = StyleAgent()
+        total = len(leads)
+        project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-        for i, lead in enumerate(leads):
+        async def process_lead(i: int, lead):
+            """Process a single lead: style → analysis → content → outreach → DB save."""
+            loop = asyncio.get_event_loop()
             lead_name = lead.name
-            progress = f"[{i+1}/{len(leads)}]"
+            progress = f"[{i+1}/{total}]"
 
-            # 1.5. Style extraction (tries Google if no website)
+            # 1.5. Style extraction
             brand_style = {}
             try:
                 await _log(run_id, f"{progress} 🎨 Extracting brand style: {lead.website or lead_name}")
-                brand_style = style_agent.extract(lead.website, lead_name=lead_name)
+                brand_style = await loop.run_in_executor(
+                    None, lambda: style_agent.extract(lead.website, lead_name=lead_name))
                 primary = brand_style.get("primary_color", "")
                 await _log(run_id, f"{progress} StyleAgent: website={lead.website}, primary={primary}, font={brand_style.get('font_family', '')}")
                 if primary == "#1A365D":
@@ -112,7 +117,8 @@ async def run_pipeline(niche: str, count: int) -> dict:
             # 2. Analysis
             await _agent_progress(run_id, 2, "Analysis", "running", f"{progress} Аналіз: {lead_name}")
             await _log(run_id, f"{progress} 🧠 Analyzing: {lead_name}")
-            analysis = orchestrator.analysis.analyze(lead, tariffs=tariffs, niche=niche)
+            analysis = await loop.run_in_executor(
+                None, lambda: orchestrator.analysis.analyze(lead, tariffs=tariffs, niche=niche))
             score = analysis.get("score", 0) if isinstance(analysis, dict) else 0
             grade = analysis.get("grade", "?") if isinstance(analysis, dict) else "?"
             await _agent_progress(run_id, 2, "Analysis", "done", f"{progress} {lead_name}: {grade} ({score}/10)")
@@ -125,7 +131,9 @@ async def run_pipeline(niche: str, count: int) -> dict:
             lead_dir = os.path.join(results_dir, f"{i+1:02d}_{safe_name}")
             os.makedirs(lead_dir, exist_ok=True)
 
-            files = orchestrator.content.generate(lead, analysis, lead_dir, tariffs=tariffs, brand_style=brand_style, niche=niche)
+            files = await loop.run_in_executor(
+                None, lambda: orchestrator.content.generate(
+                    lead, analysis, lead_dir, tariffs=tariffs, brand_style=brand_style, niche=niche))
             html_path = files.get("html", "")
             email_path = files.get("email", "")
             pptx_path = files.get("pptx", "")
@@ -135,7 +143,8 @@ async def run_pipeline(niche: str, count: int) -> dict:
             # 4. Outreach
             await _agent_progress(run_id, 4, "Outreach", "running", f"{progress} Підготовка розсилки: {lead_name}")
             await _log(run_id, f"{progress} 📧 Processing outreach: {lead_name}")
-            outreach_status = orchestrator.outreach.process(lead, lead_dir, False)
+            outreach_status = await loop.run_in_executor(
+                None, lambda: orchestrator.outreach.process(lead, lead_dir, False))
             await _agent_progress(run_id, 4, "Outreach", "done", f"{progress} {lead_name}: {outreach_status}")
 
             # Save lead to DB
@@ -162,14 +171,12 @@ async def run_pipeline(niche: str, count: int) -> dict:
             try:
                 lead_record = db.table("leads").insert(lead_data).execute()
             except Exception:
-                # Columns may not exist yet — retry without optional ones
                 for col in ["niche", "extra_phones", "extra_emails", "social_media"]:
                     lead_data.pop(col, None)
                 lead_record = db.table("leads").insert(lead_data).execute()
             lead_id = lead_record.data[0]["id"]
 
-            # Save file records — upload HTML to Supabase Storage, fall back to local URL
-            project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            # Save file records — upload to Supabase Storage, fall back to local URL
             for file_type, file_path in [("html", html_path), ("email", email_path), ("pptx", pptx_path)]:
                 if not file_path or not os.path.exists(file_path):
                     continue
@@ -178,34 +185,33 @@ async def run_pipeline(niche: str, count: int) -> dict:
                 content_text = None
 
                 if file_type == "html":
-                    # Upload HTML presentation to Supabase Storage
                     storage_path = f"{run_id}/{lead_id}/proposal.html"
                     with open(file_path, "rb") as f:
                         file_bytes = f.read()
-                    await _log(run_id, f"[{i+1}/{len(leads)}] Uploading HTML ({len(file_bytes)} bytes)...")
+                    await _log(run_id, f"{progress} Uploading HTML ({len(file_bytes)} bytes)...")
                     storage_url = upload_to_storage("proposals", storage_path, file_bytes, content_type="text/html; charset=utf-8")
                     if storage_url:
                         file_url = storage_url
-                        await _log(run_id, f"[{i+1}/{len(leads)}] HTML uploaded to storage")
+                        await _log(run_id, f"{progress} HTML uploaded to storage")
                     else:
                         rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
                         file_url = f"/api/runs/files/{rel_path}"
-                        await _log(run_id, f"[{i+1}/{len(leads)}] HTML saved locally: {file_url}")
+                        await _log(run_id, f"{progress} HTML saved locally: {file_url}")
 
                 elif file_type == "pptx":
                     storage_path = f"{run_id}/{lead_id}/proposal.pptx"
                     with open(file_path, "rb") as f:
                         file_bytes = f.read()
-                    await _log(run_id, f"[{i+1}/{len(leads)}] Uploading PPTX ({len(file_bytes)} bytes)...")
+                    await _log(run_id, f"{progress} Uploading PPTX ({len(file_bytes)} bytes)...")
                     storage_url = upload_to_storage("proposals", storage_path, file_bytes,
                                                     content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")
                     if storage_url:
                         file_url = storage_url
-                        await _log(run_id, f"[{i+1}/{len(leads)}] PPTX uploaded to storage")
+                        await _log(run_id, f"{progress} PPTX uploaded to storage")
                     else:
                         rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
                         file_url = f"/api/runs/files/{rel_path}"
-                        await _log(run_id, f"[{i+1}/{len(leads)}] PPTX saved locally: {file_url}")
+                        await _log(run_id, f"{progress} PPTX saved locally: {file_url}")
 
                 elif file_type == "email":
                     with open(file_path, "r", encoding="utf-8") as f:
@@ -221,7 +227,10 @@ async def run_pipeline(niche: str, count: int) -> dict:
                     }
                 ).execute()
 
-            await _log(run_id, f"[{i+1}/{len(leads)}] Done: {lead_name} ({outreach_status})")
+            await _log(run_id, f"{progress} Done: {lead_name} ({outreach_status})")
+
+        # Process all leads concurrently
+        await asyncio.gather(*[process_lead(i, lead) for i, lead in enumerate(leads)])
 
         await _log(run_id, "Pipeline completed!")
 

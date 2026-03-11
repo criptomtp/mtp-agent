@@ -247,8 +247,8 @@ class ResearchAgent:
                 _add_lead(lead)
 
         # Channel dispatch — order matters for priority
-        # Request 2x to account for dedup filtering
-        remaining = lambda: max(0, count * 2 - len(leads))
+        # Request 4x to account for dedup filtering
+        remaining = lambda: max(0, count * 4 - len(leads))
         channel_methods = {
             "serper": lambda: self._search_serper(remaining(), niche=niche),
             "google": lambda: self._search_google(remaining(), niche=niche),
@@ -272,6 +272,19 @@ class ResearchAgent:
 
         # Deduplicate against existing leads in DB
         leads = self._filter_already_contacted(leads)
+
+        # After dedup, if not enough — try extra English query
+        if len(leads) < count:
+            logger.info(f"[Research] After dedup only {len(leads)}/{count}, trying English fallback")
+            try:
+                extra = self._search_serper(count * 3, niche=f"{niche} shop Ukraine")
+                for lead in extra:
+                    if len(leads) >= count * 2:
+                        break
+                    _add_lead(lead)
+                leads = self._filter_already_contacted(leads)
+            except Exception as e:
+                logger.warning(f"[ResearchAgent] English fallback failed: {e}")
 
         # Gemini fallback — generate leads via AI if scrapers returned 0
         if len(leads) < count:
