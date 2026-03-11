@@ -904,6 +904,32 @@ class ResearchAgent:
         except Exception as e:
             logger.debug(f"[ResearchAgent] Website scrape failed for {lead.name}: {e}")
 
+    # Phone numbers that are clearly fake, test, or placeholder
+    FAKE_PHONE_PATTERNS = {
+        "+380000000000", "+380111111111", "+380123456789", "+380999999999",
+        "+380501234567", "+380001234567",
+    }
+
+    @staticmethod
+    def _is_fake_phone(phone: str) -> bool:
+        """Detect fake/placeholder phone numbers."""
+        if not phone:
+            return True
+        digits = re.sub(r"[^\d]", "", phone)
+        if len(digits) < 10:
+            return True
+        # All same digit after country code (e.g. +380000000000)
+        suffix = digits[2:] if digits.startswith("38") else digits
+        if len(set(suffix)) <= 1:
+            return True
+        # Sequential digits (1234567890)
+        if suffix in "1234567890" or suffix in "0987654321":
+            return True
+        # Repeated pairs (e.g. 121212...)
+        if len(suffix) >= 6 and len(set(suffix[i:i+2] for i in range(0, len(suffix)-1, 2))) <= 1:
+            return True
+        return False
+
     def _extract_contacts_from_html(self, lead: Lead, html: str):
         """Extract all emails, phones, and social media from HTML."""
         import json as _json
@@ -942,7 +968,7 @@ class ResearchAgent:
                 phone = f"+{clean_digits[:12]}"
             elif clean_digits.startswith("0") and len(clean_digits) >= 10:
                 phone = f"+38{clean_digits[:10]}"
-            if phone and phone not in all_phones:
+            if phone and phone not in all_phones and not self._is_fake_phone(phone):
                 all_phones.append(phone)
 
         # Regex fallback for phones
@@ -962,7 +988,7 @@ class ResearchAgent:
                         phone = f"+3{clean_digits[:11]}"
                     elif clean_digits.startswith("0") and len(clean_digits) >= 10:
                         phone = f"+38{clean_digits[:10]}"
-                    if phone and phone not in all_phones:
+                    if phone and phone not in all_phones and not self._is_fake_phone(phone):
                         all_phones.append(phone)
 
         all_phones = all_phones[:3]

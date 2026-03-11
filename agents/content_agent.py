@@ -559,16 +559,22 @@ MTP FULFILLMENT (продавець):
         tariff_rows = _build_tariffs_rows(tariffs)
         rows_count = len(tariff_rows) + 1
         cols = 2
-        tbl_w = Inches(7)
-        tbl = slide.shapes.add_table(rows_count, cols, MARGIN, Inches(1.3), tbl_w, Inches(0.45 * rows_count)).table
-        tbl.columns[0].width = Inches(4.5)
-        tbl.columns[1].width = Inches(2.5)
+        # Scale row height to fit slide — cap at 0.40 per row, shrink if >12 rows
+        max_tbl_height = Inches(5.2)  # leave room for header + bottom
+        row_h = min(0.40, 5.2 / max(rows_count, 1))
+        tbl_h = Inches(row_h * rows_count)
+        tbl_w = Inches(6.5)
+        tbl = slide.shapes.add_table(rows_count, cols, MARGIN, Inches(1.3), tbl_w, tbl_h).table
+        tbl.columns[0].width = Inches(4.2)
+        tbl.columns[1].width = Inches(2.3)
+        font_sz = Pt(12) if rows_count <= 12 else Pt(10)
         # Header
         for ci, txt in enumerate(["Послуга", "Тариф"]):
             cell = tbl.cell(0, ci)
             cell.text = txt
             cell.fill.solid()
             cell.fill.fore_color.rgb = ACCENT
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
             for p in cell.text_frame.paragraphs:
                 p.font.size = Pt(13)
                 p.font.bold = True
@@ -581,27 +587,30 @@ MTP FULFILLMENT (продавець):
                 cell.text = txt
                 cell.fill.solid()
                 cell.fill.fore_color.rgb = BG_CARD if ri % 2 == 0 else BG
+                cell.vertical_anchor = MSO_ANCHOR.MIDDLE
                 for p in cell.text_frame.paragraphs:
-                    p.font.size = Pt(12)
+                    p.font.size = font_sz
                     p.font.color.rgb = WHITE if ci == 0 else MINT
                     p.font.name = "Calibri"
-        # Pricing estimate
+        # Pricing estimate — positioned to the right of the table
         pricing = analysis.get("pricing_estimate", {})
-        if pricing:
-            self._pptx_text_box(slide, Inches(8.5), Inches(1.3), Inches(4), Inches(0.4),
+        est_x = MARGIN + tbl_w + Inches(0.5)
+        est_w = W - est_x - MARGIN
+        if pricing and est_w > Inches(2):
+            self._pptx_text_box(slide, est_x, Inches(1.3), est_w, Inches(0.4),
                                 "ОРІЄНТОВНИЙ КОШТОРИС", font_size=12, color=ACCENT, bold=True)
             y_off = Inches(2.0)
             if isinstance(pricing, dict):
                 for key, val in pricing.items():
                     label = key.replace("_", " ").capitalize()
-                    self._pptx_text_box(slide, Inches(8.5), y_off, Inches(2.5), Inches(0.4),
-                                        label, font_size=13, color=LIGHT)
-                    self._pptx_text_box(slide, Inches(11), y_off, Inches(1.5), Inches(0.4),
-                                        str(val), font_size=13, bold=True, color=MINT, alignment=PP_ALIGN.RIGHT)
-                    y_off += Inches(0.45)
+                    self._pptx_text_box(slide, est_x, y_off, est_w, Inches(0.4),
+                                        label, font_size=12, color=LIGHT)
+                    self._pptx_text_box(slide, est_x, y_off + Inches(0.22), est_w, Inches(0.4),
+                                        str(val), font_size=12, bold=True, color=MINT)
+                    y_off += Inches(0.55)
             else:
-                self._pptx_text_box(slide, Inches(8.5), y_off, Inches(4), Inches(1),
-                                    str(pricing), font_size=16, color=WHITE)
+                self._pptx_text_box(slide, est_x, y_off, est_w, Inches(1),
+                                    str(pricing), font_size=14, color=WHITE)
 
         # ── SLIDE 6: CTA ──
         slide = prs.slides.add_slide(blank_layout)
@@ -725,6 +734,7 @@ MTP FULFILLMENT (продавець):
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
@@ -909,6 +919,21 @@ MTP FULFILLMENT (продавець):
     font-size: 13px;
     color: #444;
     margin-bottom: 8px;
+  }}
+
+  /* ── Mobile overrides ── */
+  @media (max-width: 768px) {{
+    body {{ width: 100%; padding: 0; font-size: 14px; }}
+    .header {{ padding: 24px 20px 18px; flex-direction: column; gap: 8px; }}
+    .header-left .client {{ font-size: 20px; }}
+    .hook-section {{ padding: 20px; }}
+    .hook-text {{ font-size: 17px; }}
+    .content {{ padding: 16px 20px 20px; }}
+    .benefits-grid {{ grid-template-columns: 1fr; }}
+    .pricing-table {{ font-size: 12px; }}
+    .pricing-table td {{ padding: 6px 8px; }}
+    .cta-section {{ padding: 18px 20px; }}
+    .footer {{ padding: 14px 20px; }}
   }}
 </style>
 </head>

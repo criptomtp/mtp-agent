@@ -111,6 +111,16 @@ async def get_lead_proposal(lead_id: str):
             except Exception:
                 continue
 
+        # Local file fallback
+        if not html_content and files.data:
+            import os
+            for f in files.data:
+                fp = f.get("file_path", "")
+                if fp and os.path.isfile(fp):
+                    with open(fp, "r", encoding="utf-8") as fh:
+                        html_content = fh.read()
+                    break
+
         if not html_content:
             return HTMLResponse("<h1>Презентація не знайдена</h1>", status_code=404)
 
@@ -134,11 +144,24 @@ async def get_lead_pptx(lead_id: str):
         run_id = lead_data.get("run_id", "test")
 
         # Check generated_files for a direct storage URL first
-        pptx_files = sb.table("generated_files").select("file_url").eq("lead_id", lead_id).eq("file_type", "pptx").execute()
+        pptx_files = sb.table("generated_files").select("file_url,file_path").eq("lead_id", lead_id).eq("file_type", "pptx").execute()
         if pptx_files.data:
             file_url = pptx_files.data[0].get("file_url")
             if file_url:
                 return RedirectResponse(url=file_url, status_code=302)
+
+            # Local file fallback — serve directly from disk
+            file_path = pptx_files.data[0].get("file_path")
+            if file_path:
+                import os
+                if os.path.isfile(file_path):
+                    with open(file_path, "rb") as f:
+                        content = f.read()
+                    return Response(
+                        content=content,
+                        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        headers={"Content-Disposition": f'attachment; filename="proposal_{safe_name}.pptx"'},
+                    )
 
         # Fallback: try to download from storage directly
         for path in [f"{run_id}/{lead_id}/proposal.pptx", f"test/{safe_name}/proposal.pptx"]:
