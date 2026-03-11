@@ -267,9 +267,27 @@ MTP FULFILLMENT (продавець):
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            response = model.generate_content(prompt)
-            html = response.text.strip()
+
+            # Try gemini-2.5-flash first, fallback to 1.5
+            html = None
+            for model_name in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+                try:
+                    logger.info(f"[ContentAgent] Trying {model_name} for web proposal...")
+                    model = genai.GenerativeModel(model_name)
+                    response = model.generate_content(prompt)
+                    if response.text:
+                        html = response.text.strip()
+                        logger.info(f"[ContentAgent] {model_name} returned {len(html)} bytes")
+                        break
+                    else:
+                        logger.warning(f"[ContentAgent] {model_name} returned empty response")
+                except Exception as model_err:
+                    logger.warning(f"[ContentAgent] {model_name} failed: {model_err}")
+                    continue
+
+            if not html:
+                logger.error("[ContentAgent] All Gemini models failed for web proposal")
+                return None
 
             # Strip markdown fences if present
             if html.startswith("```"):
