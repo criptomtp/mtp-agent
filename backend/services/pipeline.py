@@ -106,7 +106,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             try:
                 await _log(run_id, f"{progress} 🎨 Extracting brand style: {lead.website or lead_name}")
                 brand_style = await loop.run_in_executor(
-                    None, lambda: style_agent.extract(lead.website, lead_name=lead_name))
+                    None, lambda _w=lead.website, _n=lead_name: style_agent.extract(_w, lead_name=_n))
                 primary = brand_style.get("primary_color", "")
                 await _log(run_id, f"{progress} StyleAgent: website={lead.website}, primary={primary}, font={brand_style.get('font_family', '')}")
                 if primary == "#1A365D":
@@ -118,7 +118,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             await _agent_progress(run_id, 2, "Analysis", "running", f"{progress} Аналіз: {lead_name}")
             await _log(run_id, f"{progress} 🧠 Analyzing: {lead_name}")
             analysis = await loop.run_in_executor(
-                None, lambda: orchestrator.analysis.analyze(lead, tariffs=tariffs, niche=niche))
+                None, lambda _l=lead, _t=tariffs, _n=niche: orchestrator.analysis.analyze(_l, tariffs=_t, niche=_n))
             score = analysis.get("score", 0) if isinstance(analysis, dict) else 0
             grade = analysis.get("grade", "?") if isinstance(analysis, dict) else "?"
             await _agent_progress(run_id, 2, "Analysis", "done", f"{progress} {lead_name}: {grade} ({score}/10)")
@@ -132,8 +132,8 @@ async def run_pipeline(niche: str, count: int) -> dict:
             os.makedirs(lead_dir, exist_ok=True)
 
             files = await loop.run_in_executor(
-                None, lambda: orchestrator.content.generate(
-                    lead, analysis, lead_dir, tariffs=tariffs, brand_style=brand_style, niche=niche))
+                None, lambda _l=lead, _a=analysis, _d=lead_dir, _t=tariffs, _b=brand_style, _n=niche: orchestrator.content.generate(
+                    _l, _a, _d, tariffs=_t, brand_style=_b, niche=_n))
             html_path = files.get("html", "")
             email_path = files.get("email", "")
             pptx_path = files.get("pptx", "")
@@ -144,7 +144,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             await _agent_progress(run_id, 4, "Outreach", "running", f"{progress} Підготовка розсилки: {lead_name}")
             await _log(run_id, f"{progress} 📧 Processing outreach: {lead_name}")
             outreach_status = await loop.run_in_executor(
-                None, lambda: orchestrator.outreach.process(lead, lead_dir, False))
+                None, lambda _l=lead, _d=lead_dir: orchestrator.outreach.process(_l, _d, False))
             await _agent_progress(run_id, 4, "Outreach", "done", f"{progress} {lead_name}: {outreach_status}")
 
             # Save lead to DB
