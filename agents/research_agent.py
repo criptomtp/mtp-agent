@@ -454,6 +454,7 @@ class ResearchAgent:
         queries = [
             f"{niche} інтернет магазин Україна",
             f"{niche} купити оптом Україна",
+            f"{niche} shop Ukraine",
         ]
 
         for query in queries:
@@ -975,8 +976,6 @@ class ResearchAgent:
                         phone = f"+{clean_digits[:12]}"
                     elif clean_digits.startswith("38") and len(clean_digits) >= 11:
                         phone = f"+{clean_digits[:12]}"
-                    elif clean_digits.startswith("80") and len(clean_digits) >= 11:
-                        phone = f"+3{clean_digits[:11]}"
                     elif clean_digits.startswith("0") and len(clean_digits) >= 10:
                         phone = f"+38{clean_digits[:10]}"
                     if phone and phone not in all_phones and phone not in self.JUNK_PHONES and not self._is_junk_phone(phone):
