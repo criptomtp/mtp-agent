@@ -589,10 +589,6 @@ class ResearchAgent:
                     parsed = urlparse(site_url)
                     domain = parsed.netloc.replace("www.", "")
 
-                    # Only .ua domains
-                    if not domain.endswith(".ua"):
-                        continue
-
                     # Skip aggregators
                     if any(skip in domain for skip in self.SKIP_DOMAINS):
                         continue
@@ -857,7 +853,7 @@ class ResearchAgent:
                 if not href.startswith("http"):
                     continue
                 domain = urlparse(href).netloc.replace("www.", "")
-                if domain.endswith(".ua") and not any(s in domain for s in self.SKIP_DOMAINS):
+                if domain and not any(s in domain for s in self.SKIP_DOMAINS):
                     lead.website = href
                     lead.contact_source = "google_search"
                     logger.info(f"[ResearchAgent] Found website via Google for '{lead.name}': {href}")
@@ -901,6 +897,7 @@ class ResearchAgent:
                 "/contacts", "/kontakty", "/контакти", "/contact",
                 "/cooperation", "/partners", "/b2b", "/wholesale",
                 "/співпраця", "/партнерам", "/оптом", "/about",
+                "/for-business", "/business", "/trade", "/корпоративним", "/бізнес",
             ]
             for path in cooperation_paths:
                 pages_to_check.append(base_origin + path)
@@ -968,12 +965,15 @@ class ResearchAgent:
                 r"\+?38\s*\(?0\d{2}\)?\s*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
                 r"\+?380[\s\-\(\)]*\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}",
                 r"(?<!\d)0\d{2}[\s\-\(\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)",
+                r"\+38\s+0\d{2}[\s\-\(]*\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
             ]
             for pattern in phone_patterns:
                 for raw in re.findall(pattern, html):
                     clean_digits = re.sub(r"[^\d]", "", raw)
                     phone = None
                     if clean_digits.startswith("380") and len(clean_digits) >= 12:
+                        phone = f"+{clean_digits[:12]}"
+                    elif clean_digits.startswith("38") and len(clean_digits) >= 11:
                         phone = f"+{clean_digits[:12]}"
                     elif clean_digits.startswith("80") and len(clean_digits) >= 11:
                         phone = f"+3{clean_digits[:11]}"
@@ -992,7 +992,7 @@ class ResearchAgent:
 
         # ── Collect social media links ──
         social = {}
-        if not lead.social_media or lead.social_media == "{}":
+        if not lead.social_media or lead.social_media in ("{}", "", "null"):
             social_platforms = {
                 "instagram": r'https?://(?:www\.)?instagram\.com/[^\s"\'<>]+',
                 "facebook": r'https?://(?:www\.)?facebook\.com/[^\s"\'<>]+',
