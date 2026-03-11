@@ -201,6 +201,10 @@ async def run_pipeline(niche: str, count: int) -> dict:
                     if storage_url:
                         file_url = storage_url
                         await _log(run_id, f"[{i+1}/{len(leads)}] PPTX uploaded to storage")
+                    else:
+                        rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
+                        file_url = f"/api/runs/files/{rel_path}"
+                        await _log(run_id, f"[{i+1}/{len(leads)}] PPTX saved locally: {file_url}")
 
                 elif file_type == "email":
                     with open(file_path, "r", encoding="utf-8") as f:

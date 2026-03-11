@@ -143,25 +143,26 @@ async def get_lead_pptx(lead_id: str):
         safe_name = re.sub(r"[^\w\s-]", "", lead_data.get("name", "")).strip().replace(" ", "_")[:50]
         run_id = lead_data.get("run_id", "test")
 
-        # Check generated_files for a direct storage URL first
+        # Check generated_files for a direct storage URL or local path
         pptx_files = sb.table("generated_files").select("file_url,file_path").eq("lead_id", lead_id).eq("file_type", "pptx").execute()
         if pptx_files.data:
-            file_url = pptx_files.data[0].get("file_url")
-            if file_url:
+            file_url = pptx_files.data[0].get("file_url") or ""
+            file_path = pptx_files.data[0].get("file_path") or ""
+
+            # Redirect to Supabase Storage if we have an http URL
+            if file_url.startswith("http"):
                 return RedirectResponse(url=file_url, status_code=302)
 
             # Local file fallback — serve directly from disk
-            file_path = pptx_files.data[0].get("file_path")
-            if file_path:
-                import os
-                if os.path.isfile(file_path):
-                    with open(file_path, "rb") as f:
-                        content = f.read()
-                    return Response(
-                        content=content,
-                        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        headers={"Content-Disposition": f'attachment; filename="proposal_{safe_name}.pptx"'},
-                    )
+            import os
+            if file_path and os.path.isfile(file_path):
+                with open(file_path, "rb") as f:
+                    content = f.read()
+                return Response(
+                    content=content,
+                    media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    headers={"Content-Disposition": f'attachment; filename="proposal_{safe_name}.pptx"'},
+                )
 
         # Fallback: try to download from storage directly
         for path in [f"{run_id}/{lead_id}/proposal.pptx", f"test/{safe_name}/proposal.pptx"]:

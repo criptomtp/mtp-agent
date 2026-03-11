@@ -296,6 +296,15 @@ MTP FULFILLMENT (продавець):
                         logger.info(f"[ContentAgent] Replaced {default_color} → {brand_primary}")
                         break
 
+            # Inject CSS overrides for consistent rendering
+            css_override = """<style>
+* { font-family: 'Inter', 'Segoe UI', Arial, Helvetica, sans-serif !important; }
+table { table-layout: fixed !important; width: 100% !important; }
+td, th { overflow-wrap: break-word !important; word-break: break-word !important; }
+img { max-width: 100% !important; height: auto !important; }
+</style>"""
+            html = html.replace("</head>", css_override + "\n</head>", 1)
+
         except Exception as e:
             logger.error(f"[ContentAgent] Gemini HTML generation failed: {e}", exc_info=True)
             return None
@@ -592,7 +601,7 @@ MTP FULFILLMENT (продавець):
                     p.font.size = font_sz
                     p.font.color.rgb = WHITE if ci == 0 else MINT
                     p.font.name = "Calibri"
-        # Pricing estimate — positioned to the right of the table
+        # Pricing estimate — positioned to the right of the table, 2-row layout per item
         pricing = analysis.get("pricing_estimate", {})
         est_x = MARGIN + tbl_w + Inches(0.5)
         est_w = W - est_x - MARGIN
@@ -603,13 +612,22 @@ MTP FULFILLMENT (продавець):
             if isinstance(pricing, dict):
                 for key, val in pricing.items():
                     label = key.replace("_", " ").capitalize()
-                    self._pptx_text_box(slide, est_x, y_off, est_w, Inches(0.4),
-                                        label, font_size=12, color=LIGHT)
-                    self._pptx_text_box(slide, est_x, y_off + Inches(0.22), est_w, Inches(0.4),
-                                        str(val), font_size=12, bold=True, color=MINT)
-                    y_off += Inches(0.55)
+                    # Row 1: label
+                    self._pptx_text_box(slide, est_x, y_off, Inches(4.5), Inches(0.35),
+                                        label, font_size=11, color=LIGHT)
+                    # Row 2: value with word wrap
+                    val_box = slide.shapes.add_textbox(est_x, y_off + Inches(0.35), Inches(4.5), Inches(0.5))
+                    val_tf = val_box.text_frame
+                    val_tf.word_wrap = True
+                    val_p = val_tf.paragraphs[0]
+                    val_p.text = str(val)
+                    val_p.font.size = Pt(13)
+                    val_p.font.bold = True
+                    val_p.font.color.rgb = MINT
+                    val_p.font.name = "Calibri"
+                    y_off += Inches(1.0)
             else:
-                self._pptx_text_box(slide, est_x, y_off, est_w, Inches(1),
+                self._pptx_text_box(slide, est_x, y_off, Inches(4.5), Inches(1),
                                     str(pricing), font_size=14, color=WHITE)
 
         # ── SLIDE 6: CTA ──
