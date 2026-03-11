@@ -930,7 +930,9 @@ class ResearchAgent:
                 social = _json.loads(lead.social_media)
             ig_url = social.get("instagram", "")
             if ig_url:
+                logger.info(f"[IG] Scraping instagram for {lead.name}: {ig_url}")
                 ig_data = self._scrape_instagram_bio(ig_url)
+                logger.info(f"[IG] Result: followers={ig_data.get('followers')}, following={ig_data.get('following_count')}, email={ig_data.get('bio_email')}")
                 if ig_data.get("bio_email") and not lead.email:
                     lead.email = ig_data["bio_email"]
                     lead.contact_source = "instagram_bio"
@@ -967,79 +969,117 @@ class ResearchAgent:
             logger.debug(f"[ResearchAgent] Instagram scrape failed for {lead.name}: {e}")
 
     def _scrape_instagram_bio(self, instagram_url: str) -> dict:
-        """Scrape Instagram profile bio for contacts and follower count."""
-        result = {"followers": None, "following_count": None, "bio_email": None, "bio_phone": None, "bio_text": "", "linktree_url": None}
+        """Scrape Instagram profile via Serper + picuki (direct IG blocked on Railway)."""
+        result = {"followers": None, "following_count": None, "bio_text": "",
+                  "bio_email": None, "bio_phone": None, "linktree_url": None, "bio_mentions": []}
         try:
             username = instagram_url.rstrip("/").split("/")[-1].lstrip("@")
             if not username or username in ("p", "explore", "reel", "stories"):
                 return result
 
-            # Scrape profile page with Googlebot UA (more likely to get meta tags)
-            url = f"https://www.instagram.com/{username}/"
-            headers = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
-            resp = requests.get(url, headers=headers, timeout=10)
-            text = resp.text
+            # Strategy 1: Google search for Instagram profile info via Serper
+            api_key = self._api_keys.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY", "")
+            if api_key:
+                try:
+                    headers = {"X-API-KEY": api_key, "Content-Type": "application/json"}
+                    resp = requests.post(
+                        "https://google.serper.dev/search",
+                        json={"q": f"instagram.com/{username}", "gl": "ua", "num": 3},
+                        headers=headers, timeout=10
+                    )
+                    data = resp.json()
 
-            # Extract from <meta name="description"> (more detailed than og:description)
-            desc_match = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', text, re.IGNORECASE | re.DOTALL)
-            if not desc_match:
-                desc_match = re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']description["\']', text, re.IGNORECASE | re.DOTALL)
+                    # Extract from knowledgeGraph if present
+                    kg = data.get("knowledgeGraph", {})
+                    if kg:
+                        desc = kg.get("description", "")
+                        result["bio_text"] = desc
 
-            if desc_match:
-                full_desc = html_module.unescape(desc_match.group(1))
-                result["bio_text"] = full_desc
+                    # Extract from organic snippets about this instagram profile
+                    for item in data.get("organic", []):
+                        if username.lower() in item.get("link", "").lower() and "instagram.com" in item.get("link", ""):
+                            snippet = item.get("snippet", "")
+                            title = item.get("title", "")
+                            combined = snippet + " " + title
 
-                # Following count: "подписки: 27" or "following: 27" or "підписки: 5"
-                following_match = re.search(
-                    r'(?:подписки|following|підписок|підписки)[:\s]+(\d+(?:[.,]\d+)?(?:\s*[KkТт])?)',
-                    full_desc, re.IGNORECASE
-                )
-                if following_match:
-                    val = following_match.group(1).replace(',', '.').strip()
-                    if any(c in val.lower() for c in ['k', 'т']):
-                        result["following_count"] = int(float(re.sub(r'[^0-9.]', '', val)) * 1000)
-                    else:
-                        result["following_count"] = int(re.sub(r'[^0-9]', '', val))
+                            # Followers from snippet: "157K Followers" or "157 тис. підписників"
+                            followers_m = re.search(
+                                r'([\d.,]+)\s*[KkТтMм]?\s*(?:Followers|підписник|подписчик)',
+                                combined, re.IGNORECASE
+                            )
+                            if followers_m:
+                                val = followers_m.group(1).replace(',', '.')
+                                mult = 1000 if any(c in followers_m.group(0).lower() for c in ['k', 'т']) else (1000000 if 'm' in followers_m.group(0).lower() else 1)
+                                result["followers"] = int(float(re.sub(r'[^0-9.]', '', val)) * mult)
 
-                # Followers: "подписчики: 158K"
-                followers_match = re.search(
-                    r'(?:подписчики|followers|підписники|підписники)[:\s]+([\d.,]+(?:\s*[KkТтMм])?)',
-                    full_desc, re.IGNORECASE
-                )
-                if followers_match:
-                    val = followers_match.group(1).replace(',', '.').strip()
-                    mult = 1000 if any(c in val.lower() for c in ['k', 'т']) else (1000000 if 'm' in val.lower() else 1)
-                    result["followers"] = int(float(re.sub(r'[^0-9.]', '', val)) * mult)
+                            # Following from snippet
+                            following_m = re.search(
+                                r'([\d]+)\s*(?:Following|підписок|подписок)',
+                                snippet, re.IGNORECASE
+                            )
+                            if following_m:
+                                result["following_count"] = int(following_m.group(1))
 
-                # Extract email from bio
-                email_match = re.search(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", full_desc)
-                if email_match:
-                    result["bio_email"] = email_match.group(0)
+                            # Email in snippet
+                            email_m = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', snippet)
+                            if email_m:
+                                result["bio_email"] = email_m.group(0)
 
-                # Extract phone from bio
-                phone_match = re.search(r"\+?3?8?\s*\(?0\d{2}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", full_desc)
-                if phone_match:
-                    raw = phone_match.group(0)
-                    digits = re.sub(r"[^\d]", "", raw)
-                    if digits.startswith("380") and len(digits) >= 12:
-                        result["bio_phone"] = f"+{digits[:12]}"
-                    elif digits.startswith("0") and len(digits) >= 10:
-                        result["bio_phone"] = f"+38{digits[:10]}"
+                            result["bio_text"] = snippet
+                            break
+                except Exception as e:
+                    logger.debug(f"[IG] Serper search failed for @{username}: {e}")
 
-                # Extract linktree/taplink
-                linktree_match = re.search(r"(https?://(?:linktr\.ee|taplink\.cc|t\.me)/\S+)", full_desc)
-                if linktree_match:
-                    result["linktree_url"] = linktree_match.group(1)
+            # Strategy 2: Try picuki.com (Instagram viewer, no auth needed)
+            if result["following_count"] is None:
+                try:
+                    picuki_url = f"https://www.picuki.com/profile/{username}"
+                    headers2 = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)"}
+                    r2 = requests.get(picuki_url, headers=headers2, timeout=8)
+                    if r2.status_code == 200:
+                        # Following count
+                        following_m2 = re.search(r'following[^>]*>\s*([\d,]+)', r2.text, re.IGNORECASE)
+                        if following_m2:
+                            result["following_count"] = int(following_m2.group(1).replace(',', ''))
+                        # Followers
+                        if result["followers"] is None:
+                            followers_m2 = re.search(r'followers[^>]*>\s*([\d.,KkMm]+)', r2.text, re.IGNORECASE)
+                            if followers_m2:
+                                val = followers_m2.group(1).replace(',', '.')
+                                result["followers"] = int(float(re.sub(r'[^0-9.]', '', val)) * (1000 if 'k' in val.lower() else 1))
+                        # Bio text
+                        bio_m = re.search(r'<div class="profile-description">(.*?)</div>', r2.text, re.DOTALL)
+                        if bio_m:
+                            bio_clean = re.sub(r'<[^>]+>', '', bio_m.group(1)).strip()
+                            if not result["bio_text"]:
+                                result["bio_text"] = bio_clean
+                            # @mentions from bio
+                            mentions = re.findall(r'@([a-zA-Z0-9._]+)', bio_clean)
+                            result["bio_mentions"] = [m for m in mentions if m.lower() != username.lower()]
+                            # Email from bio
+                            if not result["bio_email"]:
+                                email_m = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', bio_clean)
+                                if email_m:
+                                    result["bio_email"] = email_m.group(0)
+                            # Phone from bio
+                            phone_m = re.search(r"\+?3?8?\s*\(?0\d{2}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", bio_clean)
+                            if phone_m:
+                                raw = phone_m.group(0)
+                                digits = re.sub(r"[^\d]", "", raw)
+                                if digits.startswith("380") and len(digits) >= 12:
+                                    result["bio_phone"] = f"+{digits[:12]}"
+                                elif digits.startswith("0") and len(digits) >= 10:
+                                    result["bio_phone"] = f"+38{digits[:10]}"
+                            # Linktree from bio
+                            linktree_m = re.search(r"(https?://(?:linktr\.ee|taplink\.cc|t\.me)/\S+)", bio_clean)
+                            if linktree_m:
+                                result["linktree_url"] = linktree_m.group(1)
+                except Exception as e:
+                    logger.debug(f"[IG] Picuki scrape failed for @{username}: {e}")
 
-                # Find @mentions in bio (related accounts, often owner/PR)
-                mentions = re.findall(r'@([a-zA-Z0-9._]+)', full_desc)
-                mentions = [m for m in mentions if m.lower() != username.lower()]
-                if mentions:
-                    result["bio_mentions"] = mentions
-
-            logger.debug(f"[ResearchAgent] Instagram @{username}: followers={result['followers']}, following={result['following_count']}, email={result['bio_email']}")
+            logger.debug(f"[IG] @{username}: followers={result['followers']}, following={result['following_count']}, email={result['bio_email']}")
         except Exception as e:
-            logger.debug(f"[ResearchAgent] Instagram scrape failed for {instagram_url}: {e}")
+            logger.debug(f"[IG] Scrape failed for {instagram_url}: {e}")
         return result
 
     def _find_owner_via_google(self, brand_name: str, instagram_username: str) -> dict:
