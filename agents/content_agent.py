@@ -268,9 +268,26 @@ MTP FULFILLMENT (продавець):
             import google.generativeai as genai
             genai.configure(api_key=api_key)
 
-            # Try gemini-2.5-flash first, fallback to 1.5
+            # Read model from pipeline settings, fallback chain if it fails
+            configured_model = "gemini-2.0-flash"
+            try:
+                import json as _json
+                settings_path = os.path.join(os.path.dirname(__file__), "..", "config", "pipeline_settings.json")
+                with open(settings_path, "r", encoding="utf-8") as _f:
+                    _settings = _json.load(_f)
+                configured_model = _settings.get("agents", {}).get("content", {}).get("model", "gemini-2.0-flash")
+                logger.info(f"[ContentAgent] Using model from settings: {configured_model}")
+            except Exception:
+                logger.info(f"[ContentAgent] No settings file, using default: {configured_model}")
+
+            # Try configured model first, then fallbacks
+            models_to_try = [configured_model]
+            for fallback in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+                if fallback not in models_to_try:
+                    models_to_try.append(fallback)
+
             html = None
-            for model_name in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+            for model_name in models_to_try:
                 try:
                     logger.info(f"[ContentAgent] Trying {model_name} for web proposal...")
                     model = genai.GenerativeModel(model_name)
