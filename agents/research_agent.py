@@ -942,8 +942,8 @@ class ResearchAgent:
                     social["linktree"] = ig_data["linktree_url"]
                     lead.social_media = _json.dumps(social, ensure_ascii=False)
 
-                # Owner/LPR detection: if following_count <= 20, likely a brand page
-                if ig_data.get("following_count", 999) <= 20:
+                # Owner/LPR detection: if following_count <= 50, likely a brand page
+                if ig_data.get("following_count", 999) <= 50:
                     username = ig_url.rstrip("/").split("/")[-1].lstrip("@")
                     owner_data = self._find_owner_via_google(lead.name, username)
                     if owner_data.get("owner_instagram"):
@@ -971,24 +971,44 @@ class ResearchAgent:
             resp = requests.get(url, headers=headers, timeout=10)
             text = resp.text
 
-            # Extract followers from JSON
-            followers_match = re.search(r'"edge_followed_by":\s*\{\s*"count":\s*(\d+)\s*\}', text)
-            if followers_match:
-                result["followers"] = int(followers_match.group(1))
+            # Extract from <meta name="description"> (more detailed than og:description)
+            desc_match = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', text, re.IGNORECASE | re.DOTALL)
+            if not desc_match:
+                desc_match = re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']description["\']', text, re.IGNORECASE | re.DOTALL)
 
-            # Extract bio text from meta description
-            bio_match = re.search(r'<meta\s+property="og:description"\s+content="([^"]+)"', text)
-            if bio_match:
-                bio_text = html_module.unescape(bio_match.group(1))
-                result["bio_text"] = bio_text
+            if desc_match:
+                full_desc = html_module.unescape(desc_match.group(1))
+                result["bio_text"] = full_desc
+
+                # Following count: "подписки: 27" or "following: 27" or "підписки: 5"
+                following_match = re.search(
+                    r'(?:подписки|following|підписок|підписки)[:\s]+(\d+(?:[.,]\d+)?(?:\s*[KkТт])?)',
+                    full_desc, re.IGNORECASE
+                )
+                if following_match:
+                    val = following_match.group(1).replace(',', '.').strip()
+                    if any(c in val.lower() for c in ['k', 'т']):
+                        result["following_count"] = int(float(re.sub(r'[^0-9.]', '', val)) * 1000)
+                    else:
+                        result["following_count"] = int(re.sub(r'[^0-9]', '', val))
+
+                # Followers: "подписчики: 158K"
+                followers_match = re.search(
+                    r'(?:подписчики|followers|підписники|підписники)[:\s]+([\d.,]+(?:\s*[KkТтMм])?)',
+                    full_desc, re.IGNORECASE
+                )
+                if followers_match:
+                    val = followers_match.group(1).replace(',', '.').strip()
+                    mult = 1000 if any(c in val.lower() for c in ['k', 'т']) else (1000000 if 'm' in val.lower() else 1)
+                    result["followers"] = int(float(re.sub(r'[^0-9.]', '', val)) * mult)
 
                 # Extract email from bio
-                email_match = re.search(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", bio_text)
+                email_match = re.search(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", full_desc)
                 if email_match:
                     result["bio_email"] = email_match.group(0)
 
                 # Extract phone from bio
-                phone_match = re.search(r"\+?3?8?\s*\(?0\d{2}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", bio_text)
+                phone_match = re.search(r"\+?3?8?\s*\(?0\d{2}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", full_desc)
                 if phone_match:
                     raw = phone_match.group(0)
                     digits = re.sub(r"[^\d]", "", raw)
@@ -997,13 +1017,8 @@ class ResearchAgent:
                     elif digits.startswith("0") and len(digits) >= 10:
                         result["bio_phone"] = f"+38{digits[:10]}"
 
-                # Extract following count from bio description
-                following_match = re.search(r"(\d+)\s+(?:подписок|following|підписок)", bio_text, re.IGNORECASE)
-                if following_match:
-                    result["following_count"] = int(following_match.group(1))
-
                 # Extract linktree/taplink
-                linktree_match = re.search(r"(https?://(?:linktr\.ee|taplink\.cc|t\.me)/\S+)", bio_text)
+                linktree_match = re.search(r"(https?://(?:linktr\.ee|taplink\.cc|t\.me)/\S+)", full_desc)
                 if linktree_match:
                     result["linktree_url"] = linktree_match.group(1)
 
