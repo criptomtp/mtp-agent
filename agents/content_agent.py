@@ -771,6 +771,28 @@ img { max-width: 100% !important; height: auto !important; }
         for c in MTP_CLIENTS:
             clients_html += f'<a href="{c.get("url","#")}" target="_blank" class="client-logo">{_escape_html(c.get("name",""))}</a>'
 
+        # Pre-build conditional sections (avoid backslashes in f-string expressions for Python 3.11)
+        insight_section = f"<p>{client_insight}</p>" if client_insight else ""
+        pains_section = (
+            "<section class='section section-alt'><div class='container'>"
+            "<h2>Виклики вашого бізнесу</h2><div class='grid'>"
+            + pains_html + "</div></div></section>"
+        ) if pains_html else ""
+        mtp_fit_style = 'style="text-align:center;max-width:700px;margin:0 auto 2rem;font-size:1.05rem;color:#555"'
+        benefits_section = (
+            "<section class='section'><div class='container'>"
+            "<h2>Чому MTP Fulfillment</h2>"
+            f"<p {mtp_fit_style}>{mtp_fit}</p>"
+            "<div class='grid'>" + benefits_html + "</div></div></section>"
+        ) if benefits_html else ""
+        social_style = 'style="text-align:center;opacity:0.8;margin-bottom:1rem"'
+        mtp_years = MTP_COMPANY.get('years', '7+')
+        mtp_shipments = MTP_COMPANY.get('shipments_per_month', '60 000+')
+        mtp_website = MTP_COMPANY.get('website', '')
+        mtp_email = MTP_COMPANY.get('email', '')
+        mtp_phone = MTP_COMPANY.get('phone', '')
+        mtp_phone_raw = MTP_COMPANY.get('phone_raw', '')
+
         html = f"""<!DOCTYPE html>
 <html lang="uk">
 <head>
@@ -877,27 +899,27 @@ h2 {{ color: var(--brand-primary); text-align: center; font-size: 2rem; margin-b
 <body>
 
 <nav class="navbar">
-  <a href="{MTP_COMPANY.get('website','#')}" target="_blank" class="nav-logo">MTP Fulfillment</a>
+  <a href="{mtp_website}" target="_blank" class="nav-logo">MTP Fulfillment</a>
   <div class="nav-actions">
-    <a href="tel:{MTP_COMPANY.get('phone_raw','')}">{MTP_COMPANY.get('phone','')}</a>
+    <a href="tel:{mtp_phone_raw}">{mtp_phone}</a>
     <a href="{calendly_url}" target="_blank" class="nav-btn btn">Записатись</a>
   </div>
 </nav>
 
 <section class="hero">
   <h1>{hook}</h1>
-  {"<p>" + client_insight + "</p>" if client_insight else ""}
+  {insight_section}
   <a href="{calendly_url}" target="_blank" class="btn">Обговорити на Zoom</a>
 </section>
 
-{"<section class='section section-alt'><div class='container'><h2>Виклики вашого бізнесу</h2><div class='grid'>" + pains_html + "</div></div></section>" if pains_html else ""}
+{pains_section}
 
-{"<section class='section'><div class='container'><h2>Чому MTP Fulfillment</h2><p style=\"text-align:center;max-width:700px;margin:0 auto 2rem;font-size:1.05rem;color:#555\">" + mtp_fit + "</p><div class='grid'>" + benefits_html + "</div></div></section>" if benefits_html else ""}
+{benefits_section}
 
 <section class="section section-dark">
   <div class="container">
     <h2>Нам довіряють</h2>
-    <p style="text-align:center;opacity:0.8;margin-bottom:1rem">{MTP_COMPANY.get('years','7+')} років на ринку &bull; {MTP_COMPANY.get('shipments_per_month','60 000+')} відправок/міс</p>
+    <p {social_style}>{mtp_years} років на ринку &bull; {mtp_shipments} відправок/міс</p>
     <div class="clients-row">{clients_html}</div>
   </div>
 </section>
@@ -921,9 +943,9 @@ h2 {{ color: var(--brand-primary); text-align: center; font-size: 2rem; margin-b
 
 <footer class="footer">
   <div class="footer-contacts">
-    <a href="mailto:{MTP_COMPANY.get('email','')}">{MTP_COMPANY.get('email','')}</a> &nbsp;|&nbsp;
-    <a href="tel:{MTP_COMPANY.get('phone_raw','')}">{MTP_COMPANY.get('phone','')}</a> &nbsp;|&nbsp;
-    <a href="{MTP_COMPANY.get('website','')}" target="_blank">{MTP_COMPANY.get('website','')}</a>
+    <a href="mailto:{mtp_email}">{mtp_email}</a> &nbsp;|&nbsp;
+    <a href="tel:{mtp_phone_raw}">{mtp_phone}</a> &nbsp;|&nbsp;
+    <a href="{mtp_website}" target="_blank">{mtp_website}</a>
   </div>
   &copy; 2026 MTP Fulfillment. Всі права захищені.
 </footer>
