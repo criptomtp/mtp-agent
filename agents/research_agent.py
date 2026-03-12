@@ -75,55 +75,37 @@ def clean_company_name(name: str, website: str = "") -> str:
     if not name:
         return name
 
-    GENERIC_KEYWORDS = [
-        'оптом', 'дропшипінг', 'купити', 'магазин', 'інтернет',
-        'shop', 'store', 'онлайн', 'online', '2024', '2025', '2026',
-    ]
+    GENERIC_KEYWORDS = {
+        'оптом', 'дропшипінг', 'купити', 'магазин', 'інтернет', 'интернет',
+        'shop', 'store', 'онлайн', 'online', 'україна', 'украина', 'ukraine',
+        '2024', '2025', '2026', 'купить', 'одежды', 'одяг', 'жіночий', 'женской',
+        'офіційний', 'офіциальный', 'виробник', 'производитель',
+    }
 
-    # Split by common separators and take the shortest meaningful part
-    # "Жіночий одяг оптом 2026, дропшипінг | Lurex" → prefer "Lurex"
-    for sep in [' | ', ' - ', ' — ', ' :: ', ' / ']:
-        parts = name.split(sep)
+    # Step 1: split by separator, take shortest brand-like part
+    for sep in [' | ', ' — ', ' - ', ' :: ', ' / ']:
+        parts = [p.strip() for p in name.split(sep) if p.strip()]
         if len(parts) > 1:
-            def _is_brand_like(part):
-                p = part.strip().lower()
-                generic_count = sum(1 for kw in GENERIC_KEYWORDS if kw in p)
-                return generic_count == 0 and len(part.strip()) <= 30
+            def _brand_score(p):
+                words = p.split()
+                generic = sum(1 for w in words if w.lower() in GENERIC_KEYWORDS)
+                return (generic, len(p))
 
-            brand_parts = [p.strip() for p in parts if p.strip() and _is_brand_like(p.strip())]
-            if brand_parts:
-                result = min(brand_parts, key=len)
-            else:
-                parts_stripped = [p.strip() for p in parts if p.strip()]
-                result = min(parts_stripped, key=len)
+            best = min(parts, key=_brand_score)
+            if len(best) < len(name) * 0.6:
+                return best.strip()
 
-            # Fallback to domain if result is too short
-            bad_endings = ("чи", "та", "або", "для", "хл", "дл", "ін", "пр", "ко", "за", "на", "по")
-            if len(result) < 5 or result.endswith(bad_endings):
-                if website:
-                    from urllib.parse import urlparse
-                    try:
-                        domain = urlparse(website).netloc.replace("www.", "")
-                        if domain:
-                            result = domain
-                    except Exception:
-                        pass
-            return result
+    # Step 2: no separator — extract brand word from end
+    # "Интернет-магазин женской одежды Solmar" → "Solmar"
+    words = name.split()
+    for word in reversed(words):
+        w_clean = re.sub(r'[^a-zA-Zа-яА-ЯіІїЇєЄ]', '', word)
+        if (len(w_clean) >= 3 and
+                w_clean.lower() not in GENERIC_KEYWORDS and
+                (w_clean[0].isupper() or w_clean.isupper())):
+            return word.strip()
 
-    # No separator found — truncate if too long
-    result = name.strip() if len(name) <= 80 else name[:80].strip()
-
-    bad_endings = ("чи", "та", "або", "для", "хл", "дл", "ін", "пр", "ко", "за", "на", "по")
-    if len(result) < 5 or result.endswith(bad_endings):
-        if website:
-            from urllib.parse import urlparse
-            try:
-                domain = urlparse(website).netloc.replace("www.", "")
-                if domain:
-                    result = domain
-            except Exception:
-                pass
-    return result
+    return name.strip()
 
 
 class ResearchAgent:
