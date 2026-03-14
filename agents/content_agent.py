@@ -517,12 +517,7 @@ img { max-width: 100% !important; height: auto !important; }
                             subtitle, font_size=20, color=LIGHT)
         self._pptx_text_box(slide, MARGIN, Inches(6.2), CONTENT_W, Inches(0.5),
                             date_str, font_size=14, color=LIGHT, alignment=PP_ALIGN.RIGHT)
-        # Accent line
         from pptx.enum.shapes import MSO_SHAPE
-        line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, MARGIN, Inches(3.5), Inches(3), Pt(4))
-        line.fill.solid()
-        line.fill.fore_color.rgb = ACCENT
-        line.line.fill.background()
 
         # ── SLIDE 2: Insight ──
         slide = prs.slides.add_slide(blank_layout)
@@ -571,6 +566,8 @@ img { max-width: 100% !important; height: auto !important; }
             else:
                 title = str(p)
                 desc = ""
+            if len(desc) > 150:
+                desc = desc[:147] + "..."
             self._pptx_text_box(slide, x + Inches(0.3), Inches(2.5), card_w - Inches(0.6), Inches(0.6),
                                 title, font_size=16, bold=True, color=WHITE)
             if desc:
@@ -687,10 +684,10 @@ img { max-width: 100% !important; height: auto !important; }
         # ── SLIDE 6: CTA ──
         slide = prs.slides.add_slide(blank_layout)
         self._pptx_add_bg(slide, prs, BG)
-        self._pptx_text_box(slide, MARGIN, Inches(1.5), CONTENT_W, Inches(0.6),
+        self._pptx_text_box(slide, MARGIN, Inches(1.2), CONTENT_W, Inches(0.6),
                             "НАСТУПНИЙ КРОК", font_size=14, color=ACCENT, bold=True)
-        cta_short = zoom_cta[:120] + ("..." if len(zoom_cta) > 120 else "")
-        self._pptx_text_box(slide, MARGIN, Inches(2.3), CONTENT_W, Inches(1.2),
+        cta_short = zoom_cta[:180] + ("..." if len(zoom_cta) > 180 else "")
+        self._pptx_text_box(slide, MARGIN, Inches(2.0), CONTENT_W, Inches(2.0),
                             cta_short, font_size=22, bold=True, color=WHITE)
         # CTA button shape
         btn_w = Inches(4)
