@@ -243,16 +243,20 @@ def suggest_niches(body: dict):
         return {"keywords": []}
 
     import json
-    import google.generativeai as genai
 
+    # Same key loading as pipeline.py line 74-76
     api_key = get_decrypted_key("gemini") or os.getenv("GEMINI_API_KEY")
+    logger.info(f"[suggest-niches] key from DB: {bool(get_decrypted_key('gemini'))}, from env: {bool(os.getenv('GEMINI_API_KEY'))}")
     if not api_key:
+        logger.error("[suggest-niches] No Gemini API key found in DB or env")
         return {"keywords": [], "error": "no api key"}
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
 
-    prompt = f"""Ти — експерт з B2B лідогенерації в Україні.
+        prompt = f"""Ти — експерт з B2B лідогенерації в Україні.
 Бізнес: {business}
 
 Дай 12 конкретних пошукових запитів для Google щоб знайти потенційних B2B клієнтів цього бізнесу в Україні.
@@ -260,14 +264,15 @@ def suggest_niches(body: dict):
 Відповідай ТІЛЬКИ JSON масивом. Без пояснень, без markdown.
 ["запит 1", "запит 2", ...]"""
 
-    try:
         response = model.generate_content(prompt)
         text = response.text.strip()
+        logger.info(f"[suggest-niches] Gemini response: {text[:100]}")
         match = re.search(r'\[.*?\]', text, re.DOTALL)
         if match:
             keywords = json.loads(match.group(0))
             return {"keywords": [k for k in keywords if isinstance(k, str)][:12]}
     except Exception as e:
+        logger.error(f"[suggest-niches] Gemini failed: {e}")
         return {"keywords": [], "error": str(e)}
 
     return {"keywords": []}
