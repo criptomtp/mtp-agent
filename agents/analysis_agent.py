@@ -300,9 +300,9 @@ def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any], n
   "email_opening": "Перший абзац email — персоналізований, не шаблонний",
   "potential": "high або medium або low",
   "pricing_estimate": {{
-    "зберігання_місяць": "розрахунок",
-    "відвантаження_місяць": "розрахунок",
-    "загалом_місяць": "підсумок"
+    "зберігання_місяць": "X грн (коротко, без пояснень)",
+    "відвантаження_місяць": "X грн",
+    "загалом_місяць": "~X грн"
   }},
   "score_data": {{
     "products_count_estimated": 0,
@@ -316,6 +316,7 @@ def _build_prompt(lead: Lead, tariffs_text: str, website_data: Dict[str, Any], n
 - pain_points мають бути специфічні для їх типу товару
 - zoom_cta має згадувати конкретний продукт або нішу клієнта
 - НЕ використовуй шаблонні фрази типу "повний цикл логістики"
+- pricing_estimate: ТІЛЬКИ 3 рядки — зберігання, відвантаження, загалом. Кожне значення максимум 50 символів. Без розрахунків і пояснень, тільки суми.
 - Повертай ТІЛЬКИ валідний JSON без markdown"""
 
     return system_prompt, user_prompt

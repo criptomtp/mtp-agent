@@ -652,7 +652,7 @@ img { max-width: 100% !important; height: auto !important; }
                     p.font.size = font_sz
                     p.font.color.rgb = WHITE if ci == 0 else MINT
                     p.font.name = "Calibri"
-        # Pricing estimate — positioned to the right of the table, 2-row layout per item
+        # Pricing estimate — positioned to the right of the table, compact 3-line format
         pricing = analysis.get("pricing_estimate", {})
         est_x = MARGIN + tbl_w + Inches(0.5)
         est_w = W - est_x - MARGIN
@@ -661,25 +661,19 @@ img { max-width: 100% !important; height: auto !important; }
                                 "ОРІЄНТОВНИЙ КОШТОРИС", font_size=12, color=ACCENT, bold=True)
             y_off = Inches(2.0)
             if isinstance(pricing, dict):
-                for key, val in pricing.items():
+                # Show max 4 items, truncate values to 50 chars
+                items = list(pricing.items())[:4]
+                for key, val in items:
                     label = key.replace("_", " ").capitalize()
-                    # Row 1: label
-                    self._pptx_text_box(slide, est_x, y_off, Inches(4.5), Inches(0.35),
-                                        label, font_size=11, color=LIGHT)
-                    # Row 2: value with word wrap
-                    val_box = slide.shapes.add_textbox(est_x, y_off + Inches(0.35), Inches(4.5), Inches(0.5))
-                    val_tf = val_box.text_frame
-                    val_tf.word_wrap = True
-                    val_p = val_tf.paragraphs[0]
-                    val_p.text = str(val)
-                    val_p.font.size = Pt(13)
-                    val_p.font.bold = True
-                    val_p.font.color.rgb = MINT
-                    val_p.font.name = "Calibri"
-                    y_off += Inches(1.0)
+                    val_str = str(val)[:50]
+                    line = f"{label}: {val_str}"
+                    self._pptx_text_box(slide, est_x, y_off, est_w - Inches(0.3), Inches(0.5),
+                                        line, font_size=11, color=MINT, bold=True)
+                    y_off += Inches(0.55)
             else:
-                self._pptx_text_box(slide, est_x, y_off, Inches(4.5), Inches(1),
-                                    str(pricing), font_size=14, color=WHITE)
+                est_text = str(pricing)[:150]
+                self._pptx_text_box(slide, est_x, y_off, est_w - Inches(0.3), Inches(1),
+                                    est_text, font_size=11, color=WHITE)
 
         # ── SLIDE 6: CTA ──
         slide = prs.slides.add_slide(blank_layout)
