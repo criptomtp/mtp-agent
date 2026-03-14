@@ -239,52 +239,64 @@ def save_user_settings(settings_data: dict):
 @router.post("/suggest-niches")
 def suggest_niches(body: dict):
     business = body.get("business", "").strip()
+    logger.info(f"[suggest-niches] called with business='{business}'")
+
     if not business:
         return {"keywords": []}
 
     import json
 
-    # Same key loading as pipeline.py line 74-76
-    api_key = get_decrypted_key("gemini") or os.getenv("GEMINI_API_KEY")
-    logger.info(f"[suggest-niches] key from DB: {bool(get_decrypted_key('gemini'))}, from env: {bool(os.getenv('GEMINI_API_KEY'))}")
+    # Step 1: get API key
+    try:
+        db_key = get_decrypted_key("gemini")
+        logger.info(f"[suggest-niches] db_key={'found' if db_key else 'None'}, len={len(db_key) if db_key else 0}")
+    except Exception as e:
+        db_key = None
+        logger.error(f"[suggest-niches] get_decrypted_key error: {e}")
+
+    env_key = os.getenv("GEMINI_API_KEY")
+    logger.info(f"[suggest-niches] env_key={'found' if env_key else 'None'}, len={len(env_key) if env_key else 0}")
+
+    api_key = db_key or env_key
     if not api_key:
-        logger.error("[suggest-niches] No Gemini API key found in DB or env")
+        logger.error("[suggest-niches] NO API KEY FOUND")
         return {"keywords": [], "error": "no api key"}
 
+    logger.info(f"[suggest-niches] using key starting with: {api_key[:8]}...")
+
+    # Step 2: import google
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
+        logger.info("[suggest-niches] genai configured OK")
     except Exception as e:
-        logger.error(f"[suggest-niches] Failed to import/configure genai: {e}")
-        return {"keywords": [], "error": str(e)}
+        logger.error(f"[suggest-niches] genai import/configure error: {e}")
+        return {"keywords": [], "error": f"genai error: {str(e)}"}
 
     prompt = f"""Ти — B2B маркетолог в Україні.
-
 Мій бізнес: {business}
-
-Твоя задача: визначити ХТО є потенційними B2B клієнтами цього бізнесу, і дати 12 пошукових запитів для Google щоб знайти цих клієнтів в Україні.
-
-Приклади логіки:
-- Фулфілмент → клієнти: інтернет-магазини, e-commerce бренди, продавці Rozetka/Prom.ua → запити: "інтернет-магазин косметика", "продавець одягу онлайн", "e-commerce brand Ukraine"
-- Юрист → клієнти: стартапи, IT компанії, ФОП → запити: "IT стартап Україна", "відкрити ФОП", "tech company Ukraine"
-- Підбір персоналу → клієнти: склади, супермаркети, виробництва → запити: "склад логістика вакансії", "виробниче підприємство Україна"
-
-Відповідай ТІЛЬКИ JSON масивом пошукових запитів. Без пояснень, без markdown.
-Запити мають бути для пошуку КЛІЄНТІВ, а не для опису мого бізнесу.
+Визнач хто є потенційними B2B клієнтами цього бізнесу і дай 12 пошукових запитів Google щоб знайти цих клієнтів в Україні.
+Відповідай ТІЛЬКИ JSON масивом. Без пояснень.
 ["запит 1", "запит 2", ...]"""
 
+    # Step 3: try models
     for model_name in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]:
         try:
+            logger.info(f"[suggest-niches] trying {model_name}...")
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
             text = response.text.strip()
+            logger.info(f"[suggest-niches] {model_name} response: {text[:150]}")
             match = re.search(r'\[.*?\]', text, re.DOTALL)
             if match:
                 keywords = json.loads(match.group(0))
-                logger.info(f"[suggest-niches] success with {model_name}, got {len(keywords)} keywords")
-                return {"keywords": [k for k in keywords if isinstance(k, str)][:12]}
+                keywords = [k for k in keywords if isinstance(k, str)][:12]
+                logger.info(f"[suggest-niches] SUCCESS with {model_name}: {len(keywords)} keywords")
+                return {"keywords": keywords}
+            else:
+                logger.warning(f"[suggest-niches] {model_name}: no JSON array in response")
         except Exception as e:
-            logger.warning(f"[suggest-niches] {model_name} failed: {str(e)[:100]}")
+            logger.warning(f"[suggest-niches] {model_name} FAILED: {str(e)[:200]}")
             continue
 
     return {"keywords": [], "error": "all models failed"}
