@@ -290,16 +290,8 @@ interface BusinessType {
   slug: string;
   icon: string;
 }
-interface Niche {
-  id: string;
-  name: string;
-  slug: string;
-  icon: string;
-  search_queries: string[];
-}
 interface UserSettingsData {
   business_type_id: string | null;
-  selected_niches: string[];
   ai_model: string;
   email_tone: string;
   language: string;
@@ -307,10 +299,8 @@ interface UserSettingsData {
 
 function BusinessTab() {
   const [businessTypes, setBusinessTypes] = useState<BusinessType[]>([]);
-  const [niches, setNiches] = useState<Niche[]>([]);
   const [userSettings, setUserSettings] = useState<UserSettingsData>({
     business_type_id: null,
-    selected_niches: [],
     ai_model: "gemini-2.0-flash",
     email_tone: "friendly",
     language: "uk",
@@ -331,27 +321,15 @@ function BusinessTab() {
         const bt = bts.find((b: BusinessType) => b.id === us.business_type_id);
         if (bt) {
           setSelectedBtSlug(bt.slug);
-          api.getNiches(bt.slug).then(setNiches);
         }
       }
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
-  const handleBusinessTypeSelect = async (bt: BusinessType) => {
+  const handleBusinessTypeSelect = (bt: BusinessType) => {
     setSelectedBtSlug(bt.slug);
-    setUserSettings((s) => ({ ...s, business_type_id: bt.id, selected_niches: [] }));
-    const n = await api.getNiches(bt.slug);
-    setNiches(n);
-  };
-
-  const toggleNiche = (nicheId: string) => {
-    setUserSettings((s) => ({
-      ...s,
-      selected_niches: s.selected_niches.includes(nicheId)
-        ? s.selected_niches.filter((id) => id !== nicheId)
-        : [...s.selected_niches, nicheId],
-    }));
+    setUserSettings((s) => ({ ...s, business_type_id: bt.id }));
   };
 
   const handleSave = async () => {
@@ -384,40 +362,6 @@ function BusinessTab() {
           ))}
         </div>
       </div>
-
-      {/* Niches */}
-      {niches.length > 0 && (
-        <div className="bg-white rounded-lg shadow p-5 mb-4">
-          <h3 className="font-semibold text-gray-800 mb-1">Цільові ніші</h3>
-          <p className="text-xs text-gray-500 mb-4">Оберіть ніші для пошуку лідів</p>
-          <div className="grid grid-cols-2 gap-2">
-            {niches.map((niche) => (
-              <label
-                key={niche.id}
-                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                  userSettings.selected_niches.includes(niche.id)
-                    ? "border-mtp-blue bg-mtp-blue/5"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={userSettings.selected_niches.includes(niche.id)}
-                  onChange={() => toggleNiche(niche.id)}
-                  className="accent-mtp-blue"
-                />
-                <span className="text-lg">{niche.icon}</span>
-                <span className="text-sm">{niche.name}</span>
-              </label>
-            ))}
-          </div>
-          {userSettings.selected_niches.length > 0 && (
-            <p className="text-xs text-mtp-blue mt-3">
-              Обрано {userSettings.selected_niches.length} з {niches.length} ніш
-            </p>
-          )}
-        </div>
-      )}
 
       {/* AI Settings */}
       <div className="bg-white rounded-lg shadow p-5 mb-4">

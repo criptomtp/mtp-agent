@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import StatCard from "../components/StatCard";
 import RunLog, { type AgentMap } from "../components/RunLog";
 import AgentCards from "../components/AgentCards";
+import NicheHelper from "../components/NicheHelper";
 
 const INITIAL_AGENTS: AgentMap = {
   1: { name: "Research", status: "waiting", detail: "" },
@@ -13,40 +14,32 @@ const INITIAL_AGENTS: AgentMap = {
 
 export default function Dashboard() {
   const [stats, setStats] = useState({ total_runs: 0, total_leads: 0, active_runs: 0 });
-  const [niche, setNiche] = useState("cosmetics");
+  const [niches, setNiches] = useState("");
   const [count, setCount] = useState(5);
   const [running, setRunning] = useState(false);
   const [agents, setAgents] = useState<AgentMap>(INITIAL_AGENTS);
-  const [savedNiches, setSavedNiches] = useState<{ id: string; name: string; icon: string; search_queries: string[] }[]>([]);
 
   useEffect(() => {
     api.getStats().then(setStats).catch(() => {});
-    // Load saved niches from user settings
-    api.getUserSettings().then(async (us) => {
-      if (us?.selected_niches?.length && us?.business_type_id) {
-        try {
-          const bts = await api.getBusinessTypes();
-          const bt = bts.find((b: any) => b.id === us.business_type_id);
-          if (bt) {
-            const allNiches = await api.getNiches(bt.slug);
-            const selected = allNiches.filter((n: any) =>
-              us.selected_niches.includes(n.id)
-            );
-            setSavedNiches(selected.map((n: any) => ({ id: n.id, name: n.name, icon: n.icon, search_queries: n.search_queries || [] })));
-          }
-        } catch { /* ignore */ }
-      }
-    }).catch(() => {});
   }, []);
 
   const handleRun = async () => {
+    const queries = niches.split("\n").map((q) => q.trim()).filter(Boolean);
+    if (queries.length === 0) return;
     setRunning(true);
     setAgents(INITIAL_AGENTS);
-    try {
-      await api.runAgents(niche, count);
-    } catch (err) {
-      console.error(err);
+    for (const query of queries) {
+      try {
+        await api.runAgents(query, count);
+      } catch (err) {
+        console.error(err);
+      }
     }
+    setRunning(false);
+  };
+
+  const handleAddNiche = (kw: string) => {
+    setNiches((prev) => (prev ? prev + "\n" + kw : kw));
   };
 
   const handleAgentUpdate = useCallback((updated: AgentMap) => {
@@ -70,16 +63,20 @@ export default function Dashboard() {
       <div className="bg-white rounded-lg shadow p-5 mb-6">
         <h3 className="font-semibold text-gray-800 mb-4">Run Agents</h3>
         <div className="flex gap-3 items-end">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Niche</label>
-            <input
-              value={niche}
-              onChange={(e) => setNiche(e.target.value)}
-              className="border rounded px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-mtp-blue/30"
+          <div className="flex-1">
+            <label className="block text-xs text-gray-500 mb-1">
+              Ніші (один запит на рядок)
+            </label>
+            <textarea
+              value={niches}
+              onChange={(e) => setNiches(e.target.value)}
+              placeholder={"косметика інтернет-магазин\nіграшки дитячі\nодяг Ukraine"}
+              rows={3}
+              className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-mtp-blue/30 resize-none"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Lead Count</label>
+            <label className="block text-xs text-gray-500 mb-1">Лідів</label>
             <input
               type="number"
               value={count}
@@ -91,55 +88,15 @@ export default function Dashboard() {
           </div>
           <button
             onClick={handleRun}
-            disabled={running}
+            disabled={running || !niches.trim()}
             className="px-5 py-1.5 bg-mtp-orange text-white rounded font-medium text-sm hover:bg-mtp-orange/90 disabled:opacity-50"
           >
             {running ? "Running..." : "Start Pipeline"}
           </button>
         </div>
-        {savedNiches.length > 0 && (
-          <div className="mt-3">
-            <span className="text-xs text-gray-500 mr-2">Збережені ніші:</span>
-            <div className="inline-flex flex-wrap gap-1.5">
-              {savedNiches.map((n) => {
-                const query = n.search_queries[0] || n.name;
-                return (
-                  <button
-                    key={n.id}
-                    onClick={() => setNiche(query)}
-                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                      niche === query
-                        ? "bg-mtp-blue text-white border-mtp-blue"
-                        : "bg-gray-50 text-gray-700 border-gray-200 hover:border-mtp-blue"
-                    }`}
-                  >
-                    {n.icon} {n.name}
-                  </button>
-                );
-              })}
-              <button
-                onClick={async () => {
-                  setRunning(true);
-                  setAgents(INITIAL_AGENTS);
-                  for (const n of savedNiches) {
-                    const query = n.search_queries[0] || n.name;
-                    setNiche(query);
-                    try {
-                      await api.runAgents(query, count);
-                    } catch (err) {
-                      console.error(err);
-                    }
-                  }
-                }}
-                disabled={running}
-                className="px-2.5 py-1 rounded-full text-xs border border-mtp-orange/30 bg-mtp-orange/10 text-mtp-orange hover:bg-mtp-orange/20 transition-colors font-medium disabled:opacity-50"
-              >
-                Всі ніші
-              </button>
-            </div>
-          </div>
-        )}
       </div>
+
+      <NicheHelper onSelect={handleAddNiche} />
 
       <AgentCards agents={agents} />
 

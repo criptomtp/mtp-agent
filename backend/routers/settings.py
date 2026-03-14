@@ -233,6 +233,55 @@ def save_user_settings(settings_data: dict):
     return {"ok": True}
 
 
+# --- AI niche suggestions ---
+
+
+class SuggestNichesIn(BaseModel):
+    business: str
+
+
+@router.post("/suggest-niches")
+def suggest_niches(body: SuggestNichesIn):
+    """Use Gemini to suggest search keywords for a business type."""
+    business = body.business.strip()
+    if not business:
+        return {"keywords": []}
+
+    import json as _json
+
+    api_key = get_decrypted_key("gemini") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return {"keywords": []}
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+
+        prompt = f"""Ти — експерт з B2B лідогенерації в Україні.
+
+Бізнес клієнта: {business}
+
+Підбери 10-15 конкретних пошукових запитів для знаходження потенційних B2B клієнтів цього бізнесу в Україні.
+Запити мають бути такими, щоб їх можна було вставити в Google для пошуку інтернет-магазинів або компаній.
+
+Відповідай ТІЛЬКИ JSON масивом рядків. Без пояснень.
+Приклад для фулфілменту: ["косметика інтернет-магазин", "дитячі іграшки онлайн", "одяг купити Ukraine"]
+
+JSON:"""
+
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            keywords = _json.loads(match.group(0))
+            return {"keywords": [str(k) for k in keywords[:15]]}
+    except Exception as e:
+        logger.warning(f"[suggest-niches] Gemini failed: {e}")
+
+    return {"keywords": []}
+
+
 # --- Migration helpers ---
 
 
