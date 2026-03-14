@@ -689,13 +689,14 @@ img { max-width: 100% !important; height: auto !important; }
         self._pptx_add_bg(slide, prs, BG)
         self._pptx_text_box(slide, MARGIN, Inches(1.5), CONTENT_W, Inches(0.6),
                             "НАСТУПНИЙ КРОК", font_size=14, color=ACCENT, bold=True)
+        cta_short = zoom_cta[:120] + ("..." if len(zoom_cta) > 120 else "")
         self._pptx_text_box(slide, MARGIN, Inches(2.3), CONTENT_W, Inches(1.2),
-                            zoom_cta, font_size=28, bold=True, color=WHITE)
+                            cta_short, font_size=22, bold=True, color=WHITE)
         # CTA button shape
         btn_w = Inches(4)
         btn_h = Inches(0.8)
         btn_x = Emu(int((W - btn_w) / 2))
-        btn = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, btn_x, Inches(4.0), btn_w, btn_h)
+        btn = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, btn_x, Inches(4.4), btn_w, btn_h)
         btn.fill.solid()
         btn.fill.fore_color.rgb = ACCENT
         btn.line.fill.background()
