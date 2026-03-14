@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from backend.services.api_keys import get_api_keys, get_decrypted_key, save_api_key, test_api_key
+from backend.services.database import get_supabase
 from backend.services.pipeline_settings import load_settings, save_settings, reset_prompts
 
 logger = logging.getLogger(__name__)
@@ -174,3 +175,59 @@ def test_lead(body: TestLeadIn):
         "web_url": files.get("web_url"),
         "web_proposal": files.get("web_proposal"),
     }
+
+
+# --- Business types & niches ---
+
+
+@router.get("/business-types")
+def get_business_types():
+    db = get_supabase()
+    result = db.table("business_types").select("*").order("name").execute()
+    return result.data
+
+
+@router.get("/niches/{business_type_slug}")
+def get_niches(business_type_slug: str):
+    db = get_supabase()
+    bt = db.table("business_types").select("id").eq("slug", business_type_slug).single().execute()
+    if not bt.data:
+        return []
+    niches = (
+        db.table("niches")
+        .select("*")
+        .eq("business_type_id", bt.data["id"])
+        .eq("is_active", True)
+        .order("sort_order")
+        .execute()
+    )
+    return niches.data
+
+
+@router.get("/user")
+def get_user_settings():
+    db = get_supabase()
+    result = db.table("user_settings").select("*").limit(1).execute()
+    if result.data:
+        return result.data[0]
+    return {
+        "business_type_id": None,
+        "selected_niches": [],
+        "ai_model": "gemini-2.0-flash",
+        "email_tone": "friendly",
+        "language": "uk",
+    }
+
+
+@router.post("/user")
+def save_user_settings(settings_data: dict):
+    db = get_supabase()
+    # Remove read-only fields
+    for key in ["id", "created_at", "updated_at"]:
+        settings_data.pop(key, None)
+    existing = db.table("user_settings").select("id").limit(1).execute()
+    if existing.data:
+        db.table("user_settings").update(settings_data).eq("id", existing.data[0]["id"]).execute()
+    else:
+        db.table("user_settings").insert(settings_data).execute()
+    return {"ok": True}

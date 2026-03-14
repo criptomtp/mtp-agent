@@ -68,6 +68,20 @@ export const api = {
   resetPrompts: () =>
     request<any>("/api/settings/reset-prompts", { method: "POST" }),
 
+  // Business types & niches
+  getBusinessTypes: () => request<any[]>("/api/settings/business-types"),
+
+  getNiches: (businessTypeSlug: string) =>
+    request<any[]>(`/api/settings/niches/${businessTypeSlug}`),
+
+  getUserSettings: () => request<any>("/api/settings/user"),
+
+  saveUserSettings: (data: any) =>
+    request<{ ok: boolean }>("/api/settings/user", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   testLead: (lead: {
     name: string;
     city?: string;

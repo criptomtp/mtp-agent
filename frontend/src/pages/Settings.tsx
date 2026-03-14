@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
-const TABS = ["Pipeline", "Промпти", "Тест Ліда"] as const;
+const TABS = ["Pipeline", "Бізнес", "Промпти", "Тест Ліда"] as const;
 type Tab = (typeof TABS)[number];
 
 const AGENT_INFO: Record<string, { label: string; desc: string; hasModel: boolean }> = {
@@ -56,6 +56,7 @@ export default function Settings() {
           setSaved={setSaved}
         />
       )}
+      {tab === "Бізнес" && <BusinessTab />}
       {tab === "Промпти" && (
         <PromptsTab
           settings={settings}
@@ -277,6 +278,187 @@ function PromptsTab({
           Скинути до дефолту
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ─── Tab: Бізнес ─── */
+
+interface BusinessType {
+  id: string;
+  name: string;
+  slug: string;
+  icon: string;
+}
+interface Niche {
+  id: string;
+  name: string;
+  slug: string;
+  icon: string;
+  search_queries: string[];
+}
+interface UserSettingsData {
+  business_type_id: string | null;
+  selected_niches: string[];
+  ai_model: string;
+  email_tone: string;
+  language: string;
+}
+
+function BusinessTab() {
+  const [businessTypes, setBusinessTypes] = useState<BusinessType[]>([]);
+  const [niches, setNiches] = useState<Niche[]>([]);
+  const [userSettings, setUserSettings] = useState<UserSettingsData>({
+    business_type_id: null,
+    selected_niches: [],
+    ai_model: "gemini-2.0-flash",
+    email_tone: "friendly",
+    language: "uk",
+  });
+  const [selectedBtSlug, setSelectedBtSlug] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      api.getBusinessTypes(),
+      api.getUserSettings(),
+    ]).then(([bts, us]) => {
+      setBusinessTypes(bts);
+      if (us) setUserSettings(us);
+      // Load niches for the saved business type
+      if (us?.business_type_id && bts.length) {
+        const bt = bts.find((b: BusinessType) => b.id === us.business_type_id);
+        if (bt) {
+          setSelectedBtSlug(bt.slug);
+          api.getNiches(bt.slug).then(setNiches);
+        }
+      }
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const handleBusinessTypeSelect = async (bt: BusinessType) => {
+    setSelectedBtSlug(bt.slug);
+    setUserSettings((s) => ({ ...s, business_type_id: bt.id, selected_niches: [] }));
+    const n = await api.getNiches(bt.slug);
+    setNiches(n);
+  };
+
+  const toggleNiche = (nicheId: string) => {
+    setUserSettings((s) => ({
+      ...s,
+      selected_niches: s.selected_niches.includes(nicheId)
+        ? s.selected_niches.filter((id) => id !== nicheId)
+        : [...s.selected_niches, nicheId],
+    }));
+  };
+
+  const handleSave = async () => {
+    await api.saveUserSettings(userSettings);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  if (loading) return <div className="text-gray-500">Завантаження...</div>;
+
+  return (
+    <div className="max-w-2xl">
+      {/* Business Type */}
+      <div className="bg-white rounded-lg shadow p-5 mb-4">
+        <h3 className="font-semibold text-gray-800 mb-4">Тип бізнесу</h3>
+        <div className="grid grid-cols-2 gap-2">
+          {businessTypes.map((bt) => (
+            <button
+              key={bt.id}
+              onClick={() => handleBusinessTypeSelect(bt)}
+              className={`flex items-center gap-2 p-3 rounded-lg border-2 text-left transition-all ${
+                userSettings.business_type_id === bt.id
+                  ? "border-mtp-blue bg-mtp-blue/5 font-medium"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <span className="text-xl">{bt.icon}</span>
+              <span className="text-sm">{bt.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Niches */}
+      {niches.length > 0 && (
+        <div className="bg-white rounded-lg shadow p-5 mb-4">
+          <h3 className="font-semibold text-gray-800 mb-1">Цільові ніші</h3>
+          <p className="text-xs text-gray-500 mb-4">Оберіть ніші для пошуку лідів</p>
+          <div className="grid grid-cols-2 gap-2">
+            {niches.map((niche) => (
+              <label
+                key={niche.id}
+                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                  userSettings.selected_niches.includes(niche.id)
+                    ? "border-mtp-blue bg-mtp-blue/5"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={userSettings.selected_niches.includes(niche.id)}
+                  onChange={() => toggleNiche(niche.id)}
+                  className="accent-mtp-blue"
+                />
+                <span className="text-lg">{niche.icon}</span>
+                <span className="text-sm">{niche.name}</span>
+              </label>
+            ))}
+          </div>
+          {userSettings.selected_niches.length > 0 && (
+            <p className="text-xs text-mtp-blue mt-3">
+              Обрано {userSettings.selected_niches.length} з {niches.length} ніш
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* AI Settings */}
+      <div className="bg-white rounded-lg shadow p-5 mb-4">
+        <h3 className="font-semibold text-gray-800 mb-4">AI Налаштування</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Тон листа</label>
+            <select
+              value={userSettings.email_tone}
+              onChange={(e) =>
+                setUserSettings((s) => ({ ...s, email_tone: e.target.value }))
+              }
+              className="border rounded px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-mtp-blue/30"
+            >
+              <option value="friendly">Дружній</option>
+              <option value="formal">Формальний</option>
+              <option value="bold">Напористий</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Мова</label>
+            <select
+              value={userSettings.language}
+              onChange={(e) =>
+                setUserSettings((s) => ({ ...s, language: e.target.value }))
+              }
+              className="border rounded px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-mtp-blue/30"
+            >
+              <option value="uk">Українська</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={handleSave}
+        className="px-6 py-2 bg-mtp-blue text-white rounded font-medium hover:bg-mtp-blue/90 transition-colors"
+      >
+        {saved ? "Збережено!" : "Зберегти налаштування"}
+      </button>
     </div>
   );
 }
