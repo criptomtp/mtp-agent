@@ -238,40 +238,30 @@ def save_user_settings(settings_data: dict):
 
 @router.post("/suggest-niches")
 def suggest_niches(body: dict):
+    """Use Gemini REST API directly to avoid google-generativeai package issues."""
+    import json
+    import requests
+
     business = body.get("business", "").strip()
     logger.info(f"[suggest-niches] called with business='{business}'")
 
     if not business:
         return {"keywords": []}
 
-    import json
-
-    # Step 1: get API key
+    # Get API key (same as pipeline.py)
     try:
         db_key = get_decrypted_key("gemini")
-        logger.info(f"[suggest-niches] db_key={'found' if db_key else 'None'}, len={len(db_key) if db_key else 0}")
     except Exception as e:
         db_key = None
         logger.error(f"[suggest-niches] get_decrypted_key error: {e}")
 
     env_key = os.getenv("GEMINI_API_KEY")
-    logger.info(f"[suggest-niches] env_key={'found' if env_key else 'None'}, len={len(env_key) if env_key else 0}")
-
     api_key = db_key or env_key
+    logger.info(f"[suggest-niches] key source: db={bool(db_key)}, env={bool(env_key)}")
+
     if not api_key:
         logger.error("[suggest-niches] NO API KEY FOUND")
         return {"keywords": [], "error": "no api key"}
-
-    logger.info(f"[suggest-niches] using key starting with: {api_key[:8]}...")
-
-    # Step 2: import google
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        logger.info("[suggest-niches] genai configured OK")
-    except Exception as e:
-        logger.error(f"[suggest-niches] genai import/configure error: {e}")
-        return {"keywords": [], "error": f"genai error: {str(e)}"}
 
     prompt = f"""Ти — B2B маркетолог в Україні.
 Мій бізнес: {business}
@@ -279,14 +269,23 @@ def suggest_niches(body: dict):
 Відповідай ТІЛЬКИ JSON масивом. Без пояснень.
 ["запит 1", "запит 2", ...]"""
 
-    # Step 3: try models
-    for model_name in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]:
+    # Try models via REST API (avoids google-generativeai package deprecation)
+    for model_name in ["gemini-2.5-flash", "gemini-2.0-flash"]:
         try:
             logger.info(f"[suggest-niches] trying {model_name}...")
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            text = response.text.strip()
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            resp = requests.post(url, json={
+                "contents": [{"parts": [{"text": prompt}]}],
+            }, timeout=30)
+
+            if resp.status_code != 200:
+                logger.warning(f"[suggest-niches] {model_name} HTTP {resp.status_code}: {resp.text[:200]}")
+                continue
+
+            data = resp.json()
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
             logger.info(f"[suggest-niches] {model_name} response: {text[:150]}")
+
             match = re.search(r'\[.*?\]', text, re.DOTALL)
             if match:
                 keywords = json.loads(match.group(0))
