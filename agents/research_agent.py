@@ -76,13 +76,21 @@ def clean_company_name(name: str, website: str = "") -> str:
         return name
 
     GENERIC_KEYWORDS = {
+        # Загальні слова
         'оптом', 'дропшипінг', 'купити', 'магазин', 'інтернет', 'интернет',
-        'shop', 'store', 'онлайн', 'online', 'україна', 'украина', 'ukraine',
-        '2024', '2025', '2026', 'купить', 'одежды', 'одяг', 'жіночий', 'женской',
+        'shop', 'store', 'онлайн', 'online', 'ukraine',
+        '2024', '2025', '2026', 'купить',
         'офіційний', 'офіциальный', 'виробник', 'производитель',
-        'взуття', 'одяг', 'косметика', 'меблі', 'техніка', 'електроніка',
-        'прикраси', 'іграшки', 'книги', 'спорт', 'аксесуари',
-        'інтернет-магазин', 'интернет-магазин', 'одягу',
+        'інтернет-магазин', 'интернет-магазин',
+        # Ніші
+        'одяг', 'одягу', 'одежды', 'взуття', 'косметика', 'косметики',
+        'меблі', 'техніка', 'електроніка', 'прикраси', 'іграшки',
+        'книги', 'спорт', 'аксесуари', 'доглядова', 'догляд',
+        'жіночий', 'жіноча', 'чоловічий', 'дитячий', 'дитяча',
+        'женской', 'женская', 'мужской', 'детский', 'натуральна', 'натуральная',
+        # Географія
+        'україна', 'украина', 'одеса', 'одесса', 'київ', 'киев', 'харків',
+        'харьков', 'львів', 'львов', 'дніпро', 'запоріжжя', 'миколаїв',
     }
 
     # Step 1: split by separator, take shortest brand-like part
@@ -100,18 +108,22 @@ def clean_company_name(name: str, website: str = "") -> str:
 
     # Step 2: skip if name is already short and clean
     words = name.split()
-    word_lowers = [w.lower() for w in words]
-    has_generic = any(w in GENERIC_KEYWORDS for w in word_lowers)
+    has_generic = any(w.lower() in GENERIC_KEYWORDS for w in words)
     if not has_generic and len(name) <= 35:
         return name.strip()
 
-    # Step 3: no separator — extract brand word from end
-    # "Интернет-магазин женской одежды Solmar" → "Solmar"
+    # Step 3: no separator — extract brand word from end, skip adjectives and geo
     for word in reversed(words):
         w_clean = re.sub(r'[^a-zA-Zа-яА-ЯіІїЇєЄ]', '', word)
-        if (len(w_clean) >= 3 and
-                w_clean.lower() not in GENERIC_KEYWORDS and
-                (w_clean[0].isupper() or w_clean.isupper())):
+        if len(w_clean) < 3:
+            continue
+        w_lower = w_clean.lower()
+        if w_lower in GENERIC_KEYWORDS:
+            continue
+        # Skip Ukrainian/Russian adjectives
+        if re.search(r'(ова|ева|ава|ній|ная|ний|ська|зька|цька)$', w_lower):
+            continue
+        if w_clean[0].isupper() or w_clean.isupper():
             return word.strip()
 
     return name.strip()
