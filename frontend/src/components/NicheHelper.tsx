@@ -32,16 +32,16 @@ export default function NicheHelper({ onSelect }: NicheHelperProps) {
 
   return (
     <div className="bg-white rounded-lg shadow p-5 mb-6">
-      <h3 className="font-semibold text-gray-800 mb-1">AI-підбір ніш</h3>
+      <h3 className="font-semibold text-gray-800 mb-1">Пошук цільових клієнтів</h3>
       <p className="text-xs text-gray-500 mb-3">
-        Опишіть свій бізнес — AI підбере ключові слова для пошуку клієнтів
+        Опишіть свій бізнес — AI визначить хто ваші потенційні клієнти
       </p>
       <div className="flex gap-2 mb-3">
         <input
           value={business}
           onChange={(e) => setBusiness(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && generate()}
-          placeholder="Наприклад: фулфілмент для e-commerce, юридичні послуги для IT..."
+          placeholder="Наприклад: фулфілмент, юридичні послуги, підбір персоналу..."
           className="flex-1 border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-mtp-blue/30"
         />
         <button
@@ -49,7 +49,7 @@ export default function NicheHelper({ onSelect }: NicheHelperProps) {
           disabled={loading || !business.trim()}
           className="px-4 py-1.5 bg-mtp-blue text-white rounded text-sm font-medium hover:bg-mtp-blue/90 disabled:opacity-50 whitespace-nowrap"
         >
-          {loading ? "..." : "Підібрати"}
+          {loading ? "..." : "Знайти клієнтів"}
         </button>
       </div>
       {keywords.length > 0 && (
