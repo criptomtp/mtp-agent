@@ -231,3 +231,67 @@ def save_user_settings(settings_data: dict):
     else:
         db.table("user_settings").insert(settings_data).execute()
     return {"ok": True}
+
+
+# --- Migration helpers ---
+
+
+@router.get("/migration-sql")
+def get_migration_sql():
+    """Returns SQL to run in Supabase Dashboard."""
+    import os as _os
+    sql_path = _os.path.join(_os.path.dirname(__file__), "..", "migrations", "001_business_types.sql")
+    with open(sql_path, "r", encoding="utf-8") as f:
+        sql = f.read()
+    return {"sql": sql}
+
+
+@router.post("/run-migration")
+def run_migration():
+    """Seed business_types and niches after tables are created via SQL Editor."""
+    db = get_supabase()
+
+    # Check if already seeded
+    try:
+        existing = db.table("business_types").select("id").limit(1).execute()
+        if existing.data:
+            return {"status": "already_exists", "message": "Tables already seeded"}
+    except Exception:
+        return {"status": "error", "message": "Tables not created yet. Run migration SQL in Supabase Dashboard first."}
+
+    try:
+        # Seed business types
+        db.table("business_types").upsert([
+            {"name": "Фулфілмент", "slug": "fulfillment", "icon": "📦"},
+            {"name": "Юридичні послуги", "slug": "legal", "icon": "⚖️"},
+            {"name": "Медична клініка", "slug": "medical", "icon": "🏥"},
+            {"name": "IT компанія", "slug": "it", "icon": "💻"},
+            {"name": "Маркетингове агентство", "slug": "marketing", "icon": "📣"},
+        ], on_conflict="slug").execute()
+
+        # Get fulfillment id
+        bt = db.table("business_types").select("id").eq("slug", "fulfillment").single().execute()
+        bt_id = bt.data["id"]
+
+        # Seed niches
+        niches = [
+            {"business_type_id": bt_id, "name": "Косметика та краса", "slug": "cosmetics", "icon": "💄", "search_queries": ["косметика інтернет-магазин", "beauty shop Ukraine"], "sort_order": 1},
+            {"business_type_id": bt_id, "name": "Дитячі іграшки", "slug": "toys", "icon": "🧸", "search_queries": ["іграшки дитячі", "toys shop Ukraine"], "sort_order": 2},
+            {"business_type_id": bt_id, "name": "Одяг та взуття", "slug": "fashion", "icon": "👗", "search_queries": ["одяг інтернет-магазин", "fashion Ukraine"], "sort_order": 3},
+            {"business_type_id": bt_id, "name": "Електроніка", "slug": "electronics", "icon": "📱", "search_queries": ["електроніка інтернет-магазин", "electronics Ukraine"], "sort_order": 4},
+            {"business_type_id": bt_id, "name": "Меблі та декор", "slug": "furniture", "icon": "🛋️", "search_queries": ["меблі онлайн", "furniture Ukraine"], "sort_order": 5},
+            {"business_type_id": bt_id, "name": "Спорт та туризм", "slug": "sports", "icon": "⚽", "search_queries": ["спортивні товари", "sports Ukraine"], "sort_order": 6},
+            {"business_type_id": bt_id, "name": "Зоотовари", "slug": "pets", "icon": "🐾", "search_queries": ["зоотовари", "pet shop Ukraine"], "sort_order": 7},
+            {"business_type_id": bt_id, "name": "Їжа та напої", "slug": "food", "icon": "🍕", "search_queries": ["їжа доставка", "food Ukraine"], "sort_order": 8},
+            {"business_type_id": bt_id, "name": "Ювелірні прикраси", "slug": "jewelry", "icon": "💍", "search_queries": ["ювелірні прикраси", "jewelry Ukraine"], "sort_order": 9},
+            {"business_type_id": bt_id, "name": "Товари для дому", "slug": "home", "icon": "🏠", "search_queries": ["товари для дому", "home goods Ukraine"], "sort_order": 10},
+        ]
+        for niche in niches:
+            try:
+                db.table("niches").insert(niche).execute()
+            except Exception:
+                pass  # skip duplicates
+
+        return {"status": "ok", "message": f"Seeded {len(niches)} niches for fulfillment"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
