@@ -17,7 +17,7 @@ export default function Dashboard() {
   const [count, setCount] = useState(5);
   const [running, setRunning] = useState(false);
   const [agents, setAgents] = useState<AgentMap>(INITIAL_AGENTS);
-  const [savedNiches, setSavedNiches] = useState<{ id: string; name: string; icon: string }[]>([]);
+  const [savedNiches, setSavedNiches] = useState<{ id: string; name: string; icon: string; search_queries: string[] }[]>([]);
 
   useEffect(() => {
     api.getStats().then(setStats).catch(() => {});
@@ -32,7 +32,7 @@ export default function Dashboard() {
             const selected = allNiches.filter((n: any) =>
               us.selected_niches.includes(n.id)
             );
-            setSavedNiches(selected.map((n: any) => ({ id: n.id, name: n.name, icon: n.icon })));
+            setSavedNiches(selected.map((n: any) => ({ id: n.id, name: n.name, icon: n.icon, search_queries: n.search_queries || [] })));
           }
         } catch { /* ignore */ }
       }
@@ -101,19 +101,41 @@ export default function Dashboard() {
           <div className="mt-3">
             <span className="text-xs text-gray-500 mr-2">Збережені ніші:</span>
             <div className="inline-flex flex-wrap gap-1.5">
-              {savedNiches.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => setNiche(n.name)}
-                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                    niche === n.name
-                      ? "bg-mtp-blue text-white border-mtp-blue"
-                      : "bg-gray-50 text-gray-700 border-gray-200 hover:border-mtp-blue"
-                  }`}
-                >
-                  {n.icon} {n.name}
-                </button>
-              ))}
+              {savedNiches.map((n) => {
+                const query = n.search_queries[0] || n.name;
+                return (
+                  <button
+                    key={n.id}
+                    onClick={() => setNiche(query)}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                      niche === query
+                        ? "bg-mtp-blue text-white border-mtp-blue"
+                        : "bg-gray-50 text-gray-700 border-gray-200 hover:border-mtp-blue"
+                    }`}
+                  >
+                    {n.icon} {n.name}
+                  </button>
+                );
+              })}
+              <button
+                onClick={async () => {
+                  setRunning(true);
+                  setAgents(INITIAL_AGENTS);
+                  for (const n of savedNiches) {
+                    const query = n.search_queries[0] || n.name;
+                    setNiche(query);
+                    try {
+                      await api.runAgents(query, count);
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }
+                }}
+                disabled={running}
+                className="px-2.5 py-1 rounded-full text-xs border border-mtp-orange/30 bg-mtp-orange/10 text-mtp-orange hover:bg-mtp-orange/20 transition-colors font-medium disabled:opacity-50"
+              >
+                Всі ніші
+              </button>
             </div>
           </div>
         )}
