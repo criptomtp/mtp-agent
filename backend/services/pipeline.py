@@ -232,6 +232,12 @@ async def run_pipeline(niche: str, count: int) -> dict:
         # Process all leads concurrently
         await asyncio.gather(*[process_lead(i, lead) for i, lead in enumerate(leads)])
 
+        # Final progress events so dashboard shows completed state
+        await _agent_progress(run_id, 1, "Research", "done", f"Знайдено {len(leads)} лідів")
+        await _agent_progress(run_id, 2, "Analysis", "done", f"Оброблено {len(leads)} лідів")
+        await _agent_progress(run_id, 3, "Content", "done", f"Згенеровано {len(leads)} КП")
+        await _agent_progress(run_id, 4, "Outreach", "done", f"Готово {len(leads)} лідів")
+
         await _log(run_id, "Pipeline completed!")
 
         db.table("runs").update(

@@ -251,7 +251,7 @@ MTP FULFILLMENT (продавець):
 - Sticky navbar (position:fixed, top:0, z-index:100, height ~60-70px) з: логотип "MTP Fulfillment" → <a href="{MTP_COMPANY['website']}" target="_blank">, телефон → <a href="tel:{MTP_COMPANY['phone_raw']}">{MTP_COMPANY['phone']}</a>, кнопка "Записатись" → <a href="{calendly_url}" target="_blank">
 - Hero секція ОБОВ'ЯЗКОВО має padding-top: мінімум 100px (щоб текст не ховався під sticky navbar)
 - Всі body секції мають padding-top достатній щоб не перекриватись navbar
-- Клієнти-референси — клікабельні: {clients_links}
+- Клієнти-референси — ТІЛЬКИ текстові бейджі (НЕ використовуй img, НЕ placeholder.com, НЕ via.placeholder): {clients_links}
 - Footer — всі контакти клікабельні: <a href="mailto:{MTP_COMPANY['email']}">, <a href="tel:{MTP_COMPANY['phone_raw']}">, <a href="{MTP_COMPANY['website']}" target="_blank">. Копірайт: © 2026 MTP Fulfillment
 - Перевір: весь текст читабельний, немає overflow, кнопки не перекривають текст, контраст достатній
 
