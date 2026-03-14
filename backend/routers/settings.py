@@ -254,9 +254,11 @@ def suggest_niches(body: dict):
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+    except Exception as e:
+        logger.error(f"[suggest-niches] Failed to import/configure genai: {e}")
+        return {"keywords": [], "error": str(e)}
 
-        prompt = f"""Ти — експерт з B2B лідогенерації в Україні.
+    prompt = f"""Ти — експерт з B2B лідогенерації в Україні.
 Бізнес: {business}
 
 Дай 12 конкретних пошукових запитів для Google щоб знайти потенційних B2B клієнтів цього бізнесу в Україні.
@@ -264,18 +266,21 @@ def suggest_niches(body: dict):
 Відповідай ТІЛЬКИ JSON масивом. Без пояснень, без markdown.
 ["запит 1", "запит 2", ...]"""
 
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        logger.info(f"[suggest-niches] Gemini response: {text[:100]}")
-        match = re.search(r'\[.*?\]', text, re.DOTALL)
-        if match:
-            keywords = json.loads(match.group(0))
-            return {"keywords": [k for k in keywords if isinstance(k, str)][:12]}
-    except Exception as e:
-        logger.error(f"[suggest-niches] Gemini failed: {e}")
-        return {"keywords": [], "error": str(e)}
+    for model_name in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            text = response.text.strip()
+            match = re.search(r'\[.*?\]', text, re.DOTALL)
+            if match:
+                keywords = json.loads(match.group(0))
+                logger.info(f"[suggest-niches] success with {model_name}, got {len(keywords)} keywords")
+                return {"keywords": [k for k in keywords if isinstance(k, str)][:12]}
+        except Exception as e:
+            logger.warning(f"[suggest-niches] {model_name} failed: {str(e)[:100]}")
+            continue
 
-    return {"keywords": []}
+    return {"keywords": [], "error": "all models failed"}
 
 
 # --- Migration helpers ---
