@@ -354,11 +354,12 @@ class ResearchAgent:
             except Exception as e:
                 logger.warning(f"[ResearchAgent] English fallback failed: {e}")
 
-        # Gemini fallback — generate leads via AI if scrapers returned 0
+        # Gemini fallback — generate leads via AI if still not enough (DB may have filtered all scraped leads)
         if len(leads) < count:
-            logger.info(f"[ResearchAgent] Scrapers returned {len(leads)}/{count}, using Gemini fallback for '{niche}'")
+            logger.info(f"[ResearchAgent] Only {len(leads)}/{count} after all channels + dedup, using Gemini fallback for '{niche}'")
             try:
-                gemini_leads = self._generate_leads_gemini(count - len(leads), niche)
+                needed = max(count - len(leads), count)  # ask for more since DB dedup will filter some
+                gemini_leads = self._generate_leads_gemini(needed, niche)
                 logger.info(f"[Research] Before Gemini fallback dedup: {len(gemini_leads)} leads")
                 gemini_leads = self._filter_already_contacted(gemini_leads)
                 logger.info(f"[Research] After Gemini fallback dedup: {len(gemini_leads)} leads")
@@ -521,7 +522,8 @@ class ResearchAgent:
                 else:
                     filtered.append(lead)
 
-            logger.info(f"[Research] Після дедуплікації: {len(filtered)}/{len(leads)} нових лідів")
+            skipped = len(leads) - len(filtered)
+            logger.info(f"[Research] Після дедуплікації: {len(filtered)}/{len(leads)} нових лідів (DB has {len(existing.data)} total records, skipped {skipped})")
             return filtered
         except Exception as e:
             logger.warning(f"[Research] Дедуплікація не вдалась: {e}")
