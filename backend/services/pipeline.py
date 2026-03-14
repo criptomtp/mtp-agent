@@ -16,6 +16,20 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
+def _is_neutral_color(hex_color: str) -> bool:
+    """Check if color is too neutral/grey to be a brand color."""
+    try:
+        h = hex_color.lstrip('#')
+        if len(h) == 3:
+            h = ''.join(c * 2 for c in h)
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        diff = max(r, g, b) - min(r, g, b)
+        brightness = (r * 299 + g * 587 + b * 114) / 1000
+        return diff < 30 and 80 < brightness < 200
+    except Exception:
+        return False
+
+
 async def _log(run_id: str, message: str):
     logger.info(f"[run:{run_id}] {message}")
     line = json.dumps({"run_id": run_id, "ts": datetime.now(timezone.utc).isoformat(), "msg": message})
@@ -109,8 +123,9 @@ async def run_pipeline(niche: str, count: int) -> dict:
                     None, lambda _w=lead.website, _n=lead_name: style_agent.extract(_w, lead_name=_n))
                 primary = brand_style.get("primary_color", "")
                 await _log(run_id, f"{progress} StyleAgent: website={lead.website}, primary={primary}, font={brand_style.get('font_family', '')}")
-                if primary == "#1A365D":
-                    await _log(run_id, f"{progress} ⚠️ WARNING: using default colors for {lead_name}, no website found")
+                if primary == "#1A365D" or _is_neutral_color(primary):
+                    brand_style["primary_color"] = "#1A365D"
+                    await _log(run_id, f"{progress} ⚠️ Using default colors (site unavailable or neutral color: {primary})")
             except Exception as e:
                 logger.warning(f"StyleAgent failed for {lead_name}: {e}")
 
