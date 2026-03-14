@@ -80,10 +80,13 @@ def clean_company_name(name: str, website: str = "") -> str:
         'shop', 'store', 'онлайн', 'online', 'україна', 'украина', 'ukraine',
         '2024', '2025', '2026', 'купить', 'одежды', 'одяг', 'жіночий', 'женской',
         'офіційний', 'офіциальный', 'виробник', 'производитель',
+        'взуття', 'одяг', 'косметика', 'меблі', 'техніка', 'електроніка',
+        'прикраси', 'іграшки', 'книги', 'спорт', 'аксесуари',
+        'інтернет-магазин', 'интернет-магазин', 'одягу',
     }
 
     # Step 1: split by separator, take shortest brand-like part
-    for sep in [' | ', ' — ', ' - ', ' :: ', ' / ']:
+    for sep in [' | ', ' — ', ' - ', ' :: ', ' / ', ': ', ':']:
         parts = [p.strip() for p in name.split(sep) if p.strip()]
         if len(parts) > 1:
             def _brand_score(p):
@@ -95,9 +98,15 @@ def clean_company_name(name: str, website: str = "") -> str:
             if len(best) < len(name) * 0.6:
                 return best.strip()
 
-    # Step 2: no separator — extract brand word from end
-    # "Интернет-магазин женской одежды Solmar" → "Solmar"
+    # Step 2: skip if name is already short and clean
     words = name.split()
+    word_lowers = [w.lower() for w in words]
+    has_generic = any(w in GENERIC_KEYWORDS for w in word_lowers)
+    if not has_generic and len(name) <= 35:
+        return name.strip()
+
+    # Step 3: no separator — extract brand word from end
+    # "Интернет-магазин женской одежды Solmar" → "Solmar"
     for word in reversed(words):
         w_clean = re.sub(r'[^a-zA-Zа-яА-ЯіІїЇєЄ]', '', word)
         if (len(w_clean) >= 3 and
