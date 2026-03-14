@@ -36,18 +36,37 @@ export default function RunLog({ onAgentUpdate }: RunLogProps) {
       try {
         const data = JSON.parse(e.data);
         if (data.type === "agent_progress") {
+          const current = agentsRef.current[data.agent];
+          // Don't downgrade from "done" back to "running"
+          const keepStatus =
+            current?.status === "done" && data.status === "running"
+              ? "done"
+              : data.status;
           agentsRef.current = {
             ...agentsRef.current,
             [data.agent]: {
               name: data.name,
-              status: data.status,
-              detail: data.detail || "",
+              status: keepStatus,
+              detail:
+                keepStatus === "done" && current?.status === "done"
+                  ? current.detail
+                  : (data.detail || ""),
             },
           };
           onAgentUpdate?.({ ...agentsRef.current });
         }
         if (data.msg) {
           setLogs((prev) => [...prev, data.msg]);
+          // Set all agents to done when pipeline completes
+          if (data.msg.includes("Pipeline completed")) {
+            agentsRef.current = Object.fromEntries(
+              Object.entries(agentsRef.current).map(([k, v]) => [
+                k,
+                { ...v, status: "done" as const },
+              ])
+            ) as AgentMap;
+            onAgentUpdate?.({ ...agentsRef.current });
+          }
         }
       } catch {
         setLogs((prev) => [...prev, e.data]);
