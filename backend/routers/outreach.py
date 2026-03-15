@@ -9,6 +9,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/outreach", tags=["outreach"])
 
 
+@router.post("/test-send")
+def test_send_email():
+    """Test email sending to verified address."""
+    result = send_email(
+        to="criptomtp@gmail.com",
+        subject="Тест MTP Fulfillment Email System",
+        text="Привіт! Це тестовий лист від MTP Lead Agent.\n\nСистема розсилки працює коректно.\n\nMTP Fulfillment",
+    )
+    return result
+
+
 @router.get("/preview/{lead_id}")
 def preview_email(lead_id: str):
     """Get email preview for a lead."""
