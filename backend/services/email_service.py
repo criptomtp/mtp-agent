@@ -15,9 +15,22 @@ def send_email(
     from_email: str = "onboarding@resend.dev",
 ) -> dict:
     """Send email via Resend API."""
-    api_key = get_decrypted_key("resend") or os.getenv("RESEND_API_KEY")
+    db_key = None
+    try:
+        db_key = get_decrypted_key("resend")
+        logger.info(f"[Email] DB key: {'found' if db_key else 'None'}")
+    except Exception as e:
+        logger.warning(f"[Email] DB key error: {e}")
+
+    env_key = os.getenv("RESEND_API_KEY")
+    logger.info(f"[Email] ENV RESEND_API_KEY: {'found len=' + str(len(env_key)) if env_key else 'None'}")
+
+    env_key2 = os.getenv("RESEND_KEY") or os.getenv("RESEND")
+    logger.info(f"[Email] ENV alternatives: {'found' if env_key2 else 'None'}")
+
+    api_key = db_key or env_key or env_key2
     if not api_key:
-        logger.error("[Email] No Resend API key found")
+        logger.error("[Email] NO API KEY - checked DB, RESEND_API_KEY, RESEND_KEY, RESEND")
         return {"ok": False, "error": "No Resend API key"}
 
     resend.api_key = api_key
