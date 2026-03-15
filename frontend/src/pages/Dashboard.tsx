@@ -60,6 +60,8 @@ export default function Dashboard() {
         />
       </div>
 
+      <NicheHelper onSelect={handleAddNiche} />
+
       <div className="bg-white rounded-lg shadow p-5 mb-6">
         <h3 className="font-semibold text-gray-800 mb-4">Run Agents</h3>
         <div className="flex gap-3 items-end">
@@ -95,8 +97,6 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
-
-      <NicheHelper onSelect={handleAddNiche} />
 
       <AgentCards agents={agents} />
 
