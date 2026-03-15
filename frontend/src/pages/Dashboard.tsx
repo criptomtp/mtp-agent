@@ -42,6 +42,15 @@ export default function Dashboard() {
     setNiches((prev) => (prev ? prev + "\n" + kw : kw));
   };
 
+  const handleAddMultiple = (queries: string[]) => {
+    setNiches((prev) => {
+      const existing = new Set(prev.split("\n").map((q) => q.trim()).filter(Boolean));
+      const newOnes = queries.filter((q) => !existing.has(q));
+      if (newOnes.length === 0) return prev;
+      return prev ? prev + "\n" + newOnes.join("\n") : newOnes.join("\n");
+    });
+  };
+
   const handleAgentUpdate = useCallback((updated: AgentMap) => {
     setAgents(updated);
   }, []);
@@ -60,7 +69,7 @@ export default function Dashboard() {
         />
       </div>
 
-      <NicheHelper onSelect={handleAddNiche} />
+      <NicheHelper onSelect={handleAddNiche} onSelectMultiple={handleAddMultiple} />
 
       <div className="bg-white rounded-lg shadow p-5 mb-6">
         <h3 className="font-semibold text-gray-800 mb-4">Run Agents</h3>
