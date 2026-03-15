@@ -8,6 +8,7 @@ export default function NicheHelper({ onSelect }: NicheHelperProps) {
   const [business, setBusiness] = useState("");
   const [keywords, setKeywords] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isFallback, setIsFallback] = useState(false);
 
   const generate = async () => {
     if (!business.trim()) return;
@@ -23,6 +24,7 @@ export default function NicheHelper({ onSelect }: NicheHelperProps) {
       );
       const data = await r.json();
       setKeywords(data.keywords || []);
+      setIsFallback(!!data.fallback);
     } catch (e) {
       console.error(e);
     } finally {
@@ -68,6 +70,9 @@ export default function NicheHelper({ onSelect }: NicheHelperProps) {
               </button>
             ))}
           </div>
+          {isFallback && (
+            <p className="text-xs text-gray-400 mt-1">* базові запити (AI тимчасово недоступний)</p>
+          )}
         </div>
       )}
     </div>

@@ -235,6 +235,40 @@ def save_user_settings(settings_data: dict):
 
 # --- AI niche suggestions ---
 
+STATIC_NICHES = {
+    "фулфілмент": [
+        "інтернет-магазин косметика", "дитячі іграшки онлайн",
+        "одяг взуття інтернет-магазин", "електроніка онлайн магазин",
+        "товари для дому онлайн", "зоотовари інтернет-магазин",
+        "спортивні товари онлайн", "ювелірні прикраси магазин",
+        "продавці Prom.ua", "магазини Rozetka продавці",
+        "e-commerce brand Ukraine", "shopify store Ukraine",
+    ],
+    "fulfillment": [
+        "online store Ukraine", "e-commerce shop Ukraine",
+        "fashion brand Ukraine", "cosmetics brand Ukraine",
+        "toys shop Ukraine", "electronics store Ukraine",
+    ],
+    "юрист": [
+        "IT стартап Україна", "ФОП реєстрація",
+        "tech company Ukraine", "агентство нерухомості",
+        "будівельна компанія Україна", "медичний заклад приватний",
+    ],
+    "підбір персоналу": [
+        "склад логістика вакансії", "виробниче підприємство Україна",
+        "супермаркет мережа Україна", "IT компанія розробники",
+        "call center Україна", "ресторан мережа Україна",
+    ],
+}
+
+
+def _get_static_fallback(business: str) -> list:
+    b = business.lower().strip()
+    for key, values in STATIC_NICHES.items():
+        if key in b:
+            return values
+    return []
+
 
 @router.post("/suggest-niches")
 def suggest_niches(body: dict):
@@ -297,6 +331,12 @@ def suggest_niches(body: dict):
         except Exception as e:
             logger.warning(f"[suggest-niches] {model_name} FAILED: {str(e)[:200]}")
             continue
+
+    # All AI models failed — use static fallback
+    fallback = _get_static_fallback(business)
+    if fallback:
+        logger.info(f"[suggest-niches] using static fallback for '{business}': {len(fallback)} keywords")
+        return {"keywords": fallback, "fallback": True}
 
     return {"keywords": [], "error": "all models failed"}
 
