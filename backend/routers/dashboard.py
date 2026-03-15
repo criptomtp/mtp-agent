@@ -11,6 +11,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 class RunAgentsIn(BaseModel):
     niche: str = "cosmetics"
+    niches: list[str] = []
     count: int = 5
 
 
@@ -32,7 +33,15 @@ def get_stats():
     }
 
 
+async def _run_niches_sequentially(niches: list[str], count: int):
+    """Run pipelines one by one to avoid API rate limits."""
+    for niche in niches:
+        await run_pipeline(niche, count)
+
+
 @router.post("/run")
 async def start_run(body: RunAgentsIn, background_tasks: BackgroundTasks):
-    background_tasks.add_task(asyncio.run, run_pipeline(body.niche, body.count))
-    return {"status": "started", "niche": body.niche, "count": body.count}
+    # Support both single niche and batch of niches
+    niches = [n.strip() for n in body.niches if n.strip()] if body.niches else [body.niche]
+    background_tasks.add_task(asyncio.run, _run_niches_sequentially(niches, body.count))
+    return {"status": "started", "niches": niches, "count": body.count}

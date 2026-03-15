@@ -12,10 +12,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   getStats: () => request<{ total_runs: number; total_leads: number; active_runs: number }>("/api/dashboard/stats"),
 
-  runAgents: (niche: string, count: number) =>
+  runAgents: (niches: string[], count: number) =>
     request<{ status: string }>("/api/dashboard/run", {
       method: "POST",
-      body: JSON.stringify({ niche, count }),
+      body: JSON.stringify({ niches, count }),
     }),
 
   getLeads: (params?: { status?: string; run_id?: string; limit?: number; offset?: number }) => {

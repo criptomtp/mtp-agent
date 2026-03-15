@@ -28,12 +28,10 @@ export default function Dashboard() {
     if (queries.length === 0) return;
     setRunning(true);
     setAgents(INITIAL_AGENTS);
-    for (const query of queries) {
-      try {
-        await api.runAgents(query, count);
-      } catch (err) {
-        console.error(err);
-      }
+    try {
+      await api.runAgents(queries, count);
+    } catch (err) {
+      console.error(err);
     }
     setRunning(false);
   };
