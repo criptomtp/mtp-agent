@@ -62,6 +62,8 @@ def send_lead_email(lead_id: str, body: dict = {}):
         to=to_email,
         subject=subject,
         text=email_text,
+        from_name="MTP Fulfillment",
+        from_email="info@fulfillmentmtp.com.ua",
     )
 
     if result["ok"]:

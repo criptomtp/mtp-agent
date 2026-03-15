@@ -12,7 +12,7 @@ def send_email(
     text: str = None,
     html: str = None,
     from_name: str = "MTP Fulfillment",
-    from_email: str = "onboarding@resend.dev",
+    from_email: str = "info@fulfillmentmtp.com.ua",
 ) -> dict:
     """Send email via Resend API."""
     db_key = None
