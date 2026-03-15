@@ -22,14 +22,17 @@ function ScoreBadge({ score, grade, label }: { score: number; grade: string; lab
 function OutreachBadge({ status }: { status: string }) {
   if (!status) return null;
   const isReady = status.startsWith("ready");
-  const isSent = status === "email_sent";
+  const isSent = status === "email_sent" || status.startsWith("sent:");
+  const isError = status.startsWith("error:");
   const color = isSent ? "bg-green-100 text-green-700 border-green-300"
     : isReady ? "bg-blue-100 text-blue-700 border-blue-300"
+    : isError ? "bg-red-100 text-red-700 border-red-300"
     : "bg-yellow-100 text-yellow-700 border-yellow-300";
-  const emoji = isSent ? "✅" : isReady ? "📨" : "✋";
+  const emoji = isSent ? "✅" : isReady ? "📨" : isError ? "❌" : "✋";
+  const label = isSent ? "відправлено" : isReady ? status.replace("ready:", "") : isError ? "помилка" : status;
   return (
     <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${color}`}>
-      {emoji} {status}
+      {emoji} {label}
     </span>
   );
 }
@@ -77,6 +80,7 @@ export default function Leads() {
   const [files, setFiles] = useState<any[]>([]);
   const [copied, setCopied] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const reload = useCallback(() => {
     api.getLeads({ status: statusFilter || undefined }).then(setLeads).catch(() => {});
@@ -136,6 +140,30 @@ export default function Leads() {
       reload();
     } catch { /* ignore */ }
     setUpdatingStatus(false);
+  }, [selected, reload]);
+
+  const handleSendEmail = useCallback(async () => {
+    if (!selected?.email) return;
+    if (!confirm(`Відправити email на ${selected.email} для ${selected.name}?`)) return;
+    setSending(true);
+    try {
+      const BASE = import.meta.env.VITE_API_URL || "";
+      const r = await fetch(`${BASE}/api/outreach/send/${selected.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await r.json();
+      if (data.ok) {
+        setSelected({ ...selected, outreach_status: `sent:${selected.email}` });
+        reload();
+      } else {
+        alert(`Помилка: ${data.error}`);
+      }
+    } catch (e) {
+      alert(`Помилка відправки`);
+    }
+    setSending(false);
   }, [selected, reload]);
 
   // Parse analysis
@@ -400,7 +428,13 @@ export default function Leads() {
               </CollapsibleSection>
 
               {/* ── Section 5: Actions ── */}
-              <div className="flex items-center gap-3 pt-2 border-t border-gray-200">
+              <div className="flex items-center gap-3 pt-2 border-t border-gray-200 flex-wrap">
+                {selected.email && !selected.outreach_status?.startsWith("sent:") && selected.outreach_status !== "email_sent" && (
+                  <button onClick={handleSendEmail} disabled={sending}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-mtp-blue text-white text-sm rounded-lg hover:bg-blue-800 transition font-medium disabled:opacity-50">
+                    {sending ? "Відправляю..." : "📧 Відправити email"}
+                  </button>
+                )}
                 {emailText && (
                   <button onClick={handleCopyEmail}
                     className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg transition font-medium ${
@@ -411,7 +445,7 @@ export default function Leads() {
                     {copied ? "✅ Скопійовано!" : "📋 Копіювати email текст"}
                   </button>
                 )}
-                {selected.outreach_status !== "email_sent" && selected.email && (
+                {selected.outreach_status !== "email_sent" && !selected.outreach_status?.startsWith("sent:") && selected.email && (
                   <button onClick={handleMarkSent} disabled={updatingStatus}
                     className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-50 text-green-700 border border-green-300 text-sm rounded-lg hover:bg-green-100 transition font-medium disabled:opacity-50">
                     {updatingStatus ? "..." : "✅ Позначити як відправлено"}
@@ -419,7 +453,7 @@ export default function Leads() {
                 )}
                 <button onClick={close}
                   className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 transition font-medium">
-                  ❌ Закрити
+                  Закрити
                 </button>
               </div>
             </div>
