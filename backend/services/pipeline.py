@@ -162,6 +162,12 @@ async def run_pipeline(niche: str, count: int) -> dict:
                 None, lambda _l=lead, _d=lead_dir: orchestrator.outreach.process(_l, _d, False))
             await _agent_progress(run_id, 4, "Outreach", "done", f"{progress} {lead_name}: {outreach_status}")
 
+            # Read email text from file
+            email_text = ""
+            if email_path and os.path.exists(email_path):
+                with open(email_path, "r", encoding="utf-8") as f:
+                    email_text = f.read()
+
             # Save lead to DB
             web_url = files.get("web_url", "")
             lead_data = {
@@ -179,6 +185,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
                 "score": analysis.get("score", 0) if isinstance(analysis, dict) else 0,
                 "score_grade": analysis.get("grade", "D") if isinstance(analysis, dict) else "D",
                 "proposal_url": web_url,
+                "email_text": email_text,
                 "extra_phones": getattr(lead, "extra_phones", "") or "",
                 "extra_emails": getattr(lead, "extra_emails", "") or "",
                 "social_media": getattr(lead, "social_media", "") or "{}",
@@ -186,7 +193,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             try:
                 lead_record = db.table("leads").insert(lead_data).execute()
             except Exception:
-                for col in ["niche", "extra_phones", "extra_emails", "social_media"]:
+                for col in ["niche", "extra_phones", "extra_emails", "social_media", "email_text"]:
                     lead_data.pop(col, None)
                 lead_record = db.table("leads").insert(lead_data).execute()
             lead_id = lead_record.data[0]["id"]
