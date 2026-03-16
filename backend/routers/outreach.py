@@ -19,6 +19,21 @@ def _extract_subject(email_text: str) -> tuple[str, str]:
     return "", email_text
 
 
+def _strip_signature(text: str) -> str:
+    """Remove signature block from email text — it's added in HTML footer."""
+    cut_markers = [
+        "Микола\nMTP", "Микола,\nMTP", "З повагою,\nМикола",
+        "З повагою,\nMTP", "---", "mtpgrouppromo@gmail.com",
+        "fulfillmentmtp.com.ua | @", "+38 (050) 144-46-45\nfulfillment",
+    ]
+    for marker in cut_markers:
+        idx = text.find(marker)
+        if idx > 0:
+            text = text[:idx].strip()
+            break
+    return text
+
+
 def _build_email_html(lead_name: str, email_text: str, proposal_url: str) -> str:
     """Build beautiful HTML email."""
     body_html = email_text.replace("\n\n", "</p><p>").replace("\n", "<br>")
@@ -116,8 +131,9 @@ def test_send_on_own_email(lead_id: str):
         )
 
     extracted_subject, email_text = _extract_subject(email_text)
+    email_text = _strip_signature(email_text)
     proposal_url = data.get("proposal_url", "")
-    subject = f"[ТЕСТ] {extracted_subject}" if extracted_subject else f"[ТЕСТ] Пропозиція для {data.get('name', '')}"
+    subject = extracted_subject or f"Пропозиція щодо фулфілменту для {data.get('name', '')}"
 
     html_content = _build_email_html(data.get("name", ""), email_text, proposal_url)
 
@@ -169,6 +185,7 @@ def send_lead_email(lead_id: str, body: dict = {}):
         )
 
     extracted_subject, email_text = _extract_subject(email_text)
+    email_text = _strip_signature(email_text)
     subject = body.get("subject") or extracted_subject or f"Пропозиція щодо фулфілменту для {data.get('name', '')}"
 
     html_content = _build_email_html(data.get("name", ""), email_text, proposal_url)
