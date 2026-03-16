@@ -54,9 +54,9 @@ def _build_email_html(lead_name: str, email_text: str, proposal_url: str) -> str
 <head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
   <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;margin-top:20px;">
-    <div style="background:#1A365D;padding:24px 32px;">
+    <div style="background:#E53E3E;padding:24px 32px;">
       <h1 style="color:#fff;margin:0;font-size:22px;">MTP Fulfillment</h1>
-      <p style="color:#90CDF4;margin:4px 0 0;font-size:13px;">fulfillmentmtp.com.ua</p>
+      <p style="color:#FEB2B2;margin:4px 0 0;font-size:13px;">fulfillmentmtp.com.ua</p>
     </div>
     <div style="padding:32px;font-size:14px;line-height:1.6;color:#333;">
       <p>{body_html}</p>
