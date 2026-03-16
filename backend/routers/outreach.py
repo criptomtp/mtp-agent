@@ -9,6 +9,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/outreach", tags=["outreach"])
 
 
+def _extract_subject(email_text: str) -> tuple[str, str]:
+    """Extract subject line from email body if present. Returns (subject, body)."""
+    lines = email_text.strip().split("\n")
+    if lines and lines[0].startswith("Тема:"):
+        subject = lines[0].replace("Тема:", "").strip()
+        body = "\n".join(lines[1:]).strip()
+        return subject, body
+    return "", email_text
+
+
 def _build_email_html(lead_name: str, email_text: str, proposal_url: str) -> str:
     """Build beautiful HTML email."""
     body_html = email_text.replace("\n\n", "</p><p>").replace("\n", "<br>")
@@ -37,12 +47,18 @@ def _build_email_html(lead_name: str, email_text: str, proposal_url: str) -> str
       <p>{body_html}</p>
       {proposal_btn}
     </div>
-    <div style="background:#f8f8f8;padding:20px 32px;border-top:1px solid #eee;">
-      <p style="color:#999;font-size:12px;margin:0;">
-        MTP Fulfillment · м. Бориспіль, Київська область<br>
-        +38 (050) 144-46-45 · info@fulfillmentmtp.com.ua<br>
-        <a href="https://fulfillmentmtp.com.ua" style="color:#999;">fulfillmentmtp.com.ua</a>
-      </p>
+    <div style="background:#f8f8f8;padding:24px 32px;border-top:2px solid #E53E3E;">
+      <p style="margin:0 0 4px;font-weight:bold;color:#1A365D;font-size:14px;">Микола | MTP Fulfillment</p>
+      <table style="border-collapse:collapse;">
+        <tr><td style="padding:2px 8px 2px 0;color:#666;font-size:12px;">📞</td>
+            <td><a href="tel:+380501444645" style="color:#1A365D;font-size:12px;text-decoration:none;">+38 (050) 144-46-45</a></td></tr>
+        <tr><td style="padding:2px 8px 2px 0;color:#666;font-size:12px;">✈️</td>
+            <td><a href="https://t.me/nikolay_mtp" style="color:#1A365D;font-size:12px;text-decoration:none;">@nikolay_mtp</a></td></tr>
+        <tr><td style="padding:2px 8px 2px 0;color:#666;font-size:12px;">🌐</td>
+            <td><a href="https://fulfillmentmtp.com.ua" style="color:#1A365D;font-size:12px;text-decoration:none;">fulfillmentmtp.com.ua</a></td></tr>
+        <tr><td style="padding:2px 8px 2px 0;color:#666;font-size:12px;">✉️</td>
+            <td><a href="mailto:info@fulfillmentmtp.com.ua" style="color:#1A365D;font-size:12px;text-decoration:none;">info@fulfillmentmtp.com.ua</a></td></tr>
+      </table>
     </div>
   </div>
 </body>
@@ -98,13 +114,16 @@ def test_send_on_own_email(lead_id: str):
             f"для інтернет-магазинів в Україні.\n\nПідготували для {data.get('name', '')} "
             f"персональну комерційну пропозицію.\n\nЗ повагою,\nМикола\nMTP Fulfillment"
         )
+
+    extracted_subject, email_text = _extract_subject(email_text)
     proposal_url = data.get("proposal_url", "")
+    subject = f"[ТЕСТ] {extracted_subject}" if extracted_subject else f"[ТЕСТ] Пропозиція для {data.get('name', '')}"
 
     html_content = _build_email_html(data.get("name", ""), email_text, proposal_url)
 
     return send_email(
         to="criptomtp@gmail.com",
-        subject=f"[ТЕСТ] Пропозиція для {data.get('name', '')}",
+        subject=subject,
         html=html_content,
         from_name="MTP Fulfillment",
         from_email="info@fulfillmentmtp.com.ua",
@@ -149,7 +168,8 @@ def send_lead_email(lead_id: str, body: dict = {}):
             f"персональну комерційну пропозицію.\n\nЗ повагою,\nМикола\nMTP Fulfillment"
         )
 
-    subject = body.get("subject") or f"Пропозиція щодо фулфілменту для {data.get('name', '')}"
+    extracted_subject, email_text = _extract_subject(email_text)
+    subject = body.get("subject") or extracted_subject or f"Пропозиція щодо фулфілменту для {data.get('name', '')}"
 
     html_content = _build_email_html(data.get("name", ""), email_text, proposal_url)
     result = send_email(
