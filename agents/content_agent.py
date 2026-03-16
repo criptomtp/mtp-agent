@@ -197,7 +197,7 @@ class ContentAgent:
         website = getattr(lead, "website", "") or ""
         city = getattr(lead, "city", "") or ""
         niche_text = niche or "e-commerce"
-        api_base = os.getenv("MTP_API_URL", "https://mtp-agent-production.up.railway.app")
+        api_base = os.getenv("MTP_API_URL", "https://kp.fulfillmentmtp.com.ua")
         calendly_url = MTP_COMPANY["calendly"]
         tariffs_prompt = get_tariffs_prompt_text()
         clients_text = get_clients_text()
@@ -417,7 +417,7 @@ img { max-width: 100% !important; height: auto !important; }
 
             html = self._generate_html_proposal(lead, analysis, tariffs, brand_style=brand_style)
             slug = hashlib.md5(f"{lead.name}-fallback-{datetime.now().isoformat()}".encode()).hexdigest()[:12]
-            api_base = os.getenv("MTP_API_URL", "https://mtp-agent-production.up.railway.app")
+            api_base = os.getenv("MTP_API_URL", "https://kp.fulfillmentmtp.com.ua")
 
             db = get_supabase_admin()
             proposal_data = {
@@ -805,7 +805,12 @@ img { max-width: 100% !important; height: auto !important; }
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Комерційна Пропозиція для {client_name} від MTP Fulfillment</title>
+<title>Комерційна пропозиція для {client_name} від MTP Fulfillment</title>
+<meta name="description" content="Персональна пропозиція щодо фулфілменту для {client_name}. MTP Fulfillment — 7+ років, 60 000+ відправок/міс, склад під Києвом.">
+<meta name="robots" content="noindex, nofollow">
+<meta property="og:title" content="Пропозиція для {client_name} | MTP Fulfillment">
+<meta property="og:description" content="Персональна комерційна пропозиція від MTP Fulfillment">
+<meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
