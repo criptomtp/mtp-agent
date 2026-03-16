@@ -727,7 +727,7 @@ img { max-width: 100% !important; height: auto !important; }
         mtp_fit = _escape_html(analysis.get("mtp_fit", ""))
         zoom_cta = _escape_html(analysis.get("zoom_cta", "Запишіться на безкоштовну Zoom-консультацію!"))
         client_name = _escape_html(lead.name)
-        calendly_url = MTP_COMPANY.get("calendly", "https://calendly.com/mtp-fulfillment")
+        calendly_url = MTP_COMPANY.get("calendly", "https://calendly.com/mtpgrouppromo/30min")
 
         # Pain points HTML
         pains_html = ""

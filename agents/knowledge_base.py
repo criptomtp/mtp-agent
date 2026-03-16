@@ -28,7 +28,7 @@ MTP_COMPANY = {
     "phone": "+38 (050) 144-46-45",
     "phone_raw": "+380501444645",
     "website": "https://fulfillmentmtp.com.ua",
-    "calendly": "https://calendly.com/mtpfulfillment/30min",
+    "calendly": "https://calendly.com/mtpgrouppromo/30min",
     "instagram": "@nikolay_mtp",
 }
 

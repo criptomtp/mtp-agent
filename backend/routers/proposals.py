@@ -50,7 +50,7 @@ class CreateProposalIn(BaseModel):
     client_name: str
     client_data: dict
     pricing_data: dict = {}
-    calendly_url: str = "https://calendly.com/mtpgrouppromo"
+    calendly_url: str = "https://calendly.com/mtpgrouppromo/30min"
 
 
 @router.post("/create")
