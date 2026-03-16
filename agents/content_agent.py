@@ -891,6 +891,13 @@ section:not(.hero):not(.cta-section) h2 {{ color: var(--text-dark) !important; }
 .footer a {{ color: #ddd; }}
 .footer .footer-contacts {{ margin-bottom: 1rem; font-size: 0.95rem; color: #ccc; }}
 
+/* Logo */
+.logo-img, .brand-logo {{
+  max-width: 200px !important;
+  max-height: 80px !important;
+  object-fit: contain;
+}}
+
 /* Mobile */
 @media (max-width: 768px) {{
   .hero {{ padding: 100px 1rem 40px; }}
@@ -901,12 +908,15 @@ section:not(.hero):not(.cta-section) h2 {{ color: var(--text-dark) !important; }
   .navbar .nav-actions {{ gap: 0.8rem; }}
   .navbar .nav-actions a:not(.nav-btn) {{ display: none; }}
   .section {{ padding: 40px 0; }}
+  .logo-img {{ max-width: 150px !important; }}
+  .container {{ padding: 0 16px !important; }}
 }}
 @media (max-width: 480px) {{
   .navbar {{ padding: 0 1rem; }}
   .navbar .nav-btn {{ padding: 6px 14px; font-size: 0.8rem; }}
   .hero h1 {{ font-size: 1.3rem; }}
   .tariff-table td, .tariff-table th {{ padding: 8px 10px; font-size: 0.85rem; }}
+  .logo-img {{ max-width: 120px !important; }}
 }}
 </style>
 </head>
@@ -969,53 +979,73 @@ section:not(.hero):not(.cta-section) h2 {{ color: var(--text-dark) !important; }
         return html
 
     def _generate_email(self, lead: Lead, analysis: Dict[str, Any], path: str):
-        subject = analysis.get("email_subject", f"{lead.name}, пропозиція від MTP Fulfillment")
-        opening = analysis.get("email_opening", f"Привіт! Ми подивились на {lead.name} і бачимо великий потенціал.")
-        client_insight = analysis.get("client_insight", "")
-        mtp_fit = analysis.get("mtp_fit", "")
-        zoom_cta = analysis.get("zoom_cta", "Запишіться на безкоштовну Zoom-консультацію!")
+        niche = getattr(lead, "niche", "") or analysis.get("niche", "e-commerce")
+        description = getattr(lead, "description", "") or "інтернет-магазин"
+        city = getattr(lead, "city", "") or "Україна"
 
-        # Build pain points text
-        pain_lines = []
-        for pain in analysis.get("pain_points", []):
-            if isinstance(pain, dict):
-                pain_lines.append(f"— {pain.get('title', '')}: {pain.get('description', '')}")
-            else:
-                pain_lines.append(f"— {pain}")
-        pains_text = "\n".join(pain_lines)
+        prompt = f"""Ти — топовий B2B копірайтер. Пишеш короткі, живі листи які ЧИТАЮТЬ і КЛІКАЮТЬ.
 
-        # Build benefits text
-        benefit_lines = []
-        for kb in analysis.get("key_benefits", []):
-            if isinstance(kb, dict):
-                benefit_lines.append(f"✓ {kb.get('benefit', '')} — {kb.get('proof', '')}")
-            else:
-                benefit_lines.append(f"✓ {kb}")
-        benefits_text = "\n".join(benefit_lines)
+Напиши email для {lead.name} ({niche} бізнес).
 
-        body = f"""Тема: {subject}
+ПРАВИЛА:
+- Максимум 5-6 речень в тілі
+- Починай з болю клієнта, не з представлення
+- Використовуй емодзі (1-2 максимум)
+- Одне конкретне УТП MTP
+- Заклик до дії — переглянути КП
+- Тон: дружній, впевнений, не "продажний"
+- БЕЗ підпису (він додається автоматично)
 
-{opening}
+Формат відповіді — тільки JSON:
+{{
+  "subject": "тема листа (коротка, інтригуюча, до 60 символів)",
+  "body": "тіло листа (5-6 речень, без підпису)"
+}}
 
-{client_insight}
+Контекст про {lead.name}:
+- Ніша: {niche}
+- Опис: {description}
+- Місто: {city}
 
-Знайомі ситуації?
-{pains_text}
+УТП MTP Fulfillment:
+- 7+ років, 60 000+ відправок/міс
+- Склад під Києвом (Бориспіль)
+- Локальні тарифи НП
+- Обробка за 30 секунд"""
 
-{mtp_fit}
+        subject = ""
+        body = ""
 
-Що ви отримаєте з МТП:
-{benefits_text}
+        # Try AI generation
+        api_key = self._api_keys.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if api_key:
+            try:
+                import requests as _req
+                import json as _json
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+                resp = _req.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=30)
+                if resp.status_code == 200:
+                    text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    # Extract JSON
+                    import re
+                    match = re.search(r'\{.*\}', text, re.DOTALL)
+                    if match:
+                        data = _json.loads(match.group(0))
+                        subject = data.get("subject", "")
+                        body = data.get("body", "")
+                        logger.info(f"[ContentAgent] AI email generated for {lead.name}")
+            except Exception as e:
+                logger.warning(f"[ContentAgent] AI email generation failed: {e}")
 
-{zoom_cta}
+        # Fallback to analysis fields
+        if not body:
+            subject = analysis.get("email_subject", f"{lead.name}, пропозиція від MTP Fulfillment")
+            opening = analysis.get("email_opening", f"Привіт! Ми подивились на {lead.name} і бачимо великий потенціал.")
+            mtp_fit = analysis.get("mtp_fit", "")
+            zoom_cta = analysis.get("zoom_cta", "Переглянте нашу комерційну пропозицію!")
+            body = f"{opening}\n\n{mtp_fit}\n\n{zoom_cta}"
 
-У додатку — детальна комерційна пропозиція з тарифами та кошторисом для {lead.name}.
-
-Микола
-MTP Fulfillment
-mtpgrouppromo@gmail.com | +38 (050) 144-46-45
-fulfillmentmtp.com.ua | @nikolay_mtp
-"""
+        email_text = f"Тема: {subject}\n\n{body}"
 
         with open(path, "w", encoding="utf-8") as f:
-            f.write(body)
+            f.write(email_text)
