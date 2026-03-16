@@ -87,14 +87,8 @@ class ContentAgent:
             f.write(html)
         logger.info(f"HTML presentation saved: {html_path}")
 
-        # PPTX generation
-        try:
-            prs = self._generate_pptx_proposal(lead, analysis, tariffs)
-            prs.save(pptx_path)
-            logger.info(f"PPTX presentation saved: {pptx_path}")
-        except Exception as e:
-            logger.error(f"PPTX generation failed: {e}", exc_info=True)
-            pptx_path = ""
+        # PPTX generation disabled — HTML proposals only
+        pptx_path = ""
 
         self._generate_email(lead, analysis, email_path)
 
@@ -918,6 +912,13 @@ section:not(.hero):not(.cta-section) h2 {{ color: var(--text-dark) !important; }
   .tariff-table td, .tariff-table th {{ padding: 8px 10px; font-size: 0.85rem; }}
   .logo-img {{ max-width: 120px !important; }}
 }}
+
+/* Contrast enforcement — ensure text is always readable on brand backgrounds */
+.hero, .hero * {{ color: {hero_text_color} !important; }}
+.navbar {{ background: {brand_primary}; }}
+.navbar a, .navbar .nav-logo {{ color: {hero_text_color} !important; }}
+.cta-section, .cta-section * {{ color: {hero_text_color} !important; }}
+.tariff-table th {{ color: {hero_text_color} !important; }}
 </style>
 </head>
 <body>
