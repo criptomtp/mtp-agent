@@ -36,6 +36,18 @@ async def _log(run_id: str, message: str):
     await log_manager.broadcast(line)
 
 
+def _get_calendly_url() -> str:
+    """Load calendly_url from user_settings, fall back to default."""
+    try:
+        db = get_supabase()
+        r = db.table("user_settings").select("calendly_url").limit(1).execute()
+        if r.data and r.data[0].get("calendly_url"):
+            return r.data[0]["calendly_url"]
+    except Exception:
+        pass
+    return "https://calendly.com/mtpgrouppromo/30min"
+
+
 async def _agent_progress(run_id: str, agent: int, name: str, status: str, detail: str = ""):
     """Broadcast structured agent progress event."""
     event = json.dumps({
@@ -86,6 +98,10 @@ async def run_pipeline(niche: str, count: int) -> dict:
             await _log(run_id, f"Loaded {len(tariffs)} tariffs from DB")
         else:
             await _log(run_id, "Using hardcoded tariffs (none in DB)")
+
+        # Load calendly URL from user settings
+        calendly_url = _get_calendly_url()
+        await _log(run_id, f"Calendly URL: {calendly_url}")
 
         from agents.orchestrator import Orchestrator
 
@@ -147,8 +163,8 @@ async def run_pipeline(niche: str, count: int) -> dict:
             os.makedirs(lead_dir, exist_ok=True)
 
             files = await loop.run_in_executor(
-                None, lambda _l=lead, _a=analysis, _d=lead_dir, _t=tariffs, _b=brand_style, _n=niche: orchestrator.content.generate(
-                    _l, _a, _d, tariffs=_t, brand_style=_b, niche=_n))
+                None, lambda _l=lead, _a=analysis, _d=lead_dir, _t=tariffs, _b=brand_style, _n=niche, _c=calendly_url: orchestrator.content.generate(
+                    _l, _a, _d, tariffs=_t, brand_style=_b, niche=_n, calendly_url=_c))
             html_path = files.get("html", "")
             email_path = files.get("email", "")
             pptx_path = files.get("pptx", "")

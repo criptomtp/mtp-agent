@@ -174,6 +174,64 @@ function PipelineTab({
       >
         {saving ? "Зберігаю..." : saved ? "Збережено!" : "Зберегти"}
       </button>
+
+      <CalendlySection />
+    </div>
+  );
+}
+
+/* ─── Calendly Section (Pipeline tab) ─── */
+
+function CalendlySection() {
+  const [calendlyUrl, setCalendlyUrl] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.getUserSettings().then((us) => {
+      setCalendlyUrl(us?.calendly_url || "https://calendly.com/mtpgrouppromo/30min");
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    await api.saveUserSettings({ calendly_url: calendlyUrl });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  if (loading) return null;
+
+  return (
+    <div className="mt-8 max-w-2xl">
+      <div className="bg-white rounded-lg shadow p-5 mb-4">
+        <h3 className="font-semibold text-gray-800 mb-1">Calendly — запис на зустріч</h3>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-800">
+          <p className="font-semibold mb-1">Як знайти своє посилання Calendly:</p>
+          <ol className="list-decimal ml-4 space-y-1">
+            <li>Зайди на <a href="https://calendly.com" target="_blank" rel="noopener noreferrer" className="underline">calendly.com</a> і увійди в акаунт</li>
+            <li>Натисни на будь-який тип зустрічі (наприклад "30 хвилин")</li>
+            <li>Скопіюй посилання з адресного рядка браузера</li>
+            <li>Або зайди в <strong>Event Types → Share →</strong> скопіюй посилання</li>
+          </ol>
+          <p className="mt-2">Посилання виглядає так: <code className="bg-blue-100 px-1 rounded">calendly.com/ваш-акаунт/30min</code></p>
+        </div>
+
+        <label className="block text-xs text-gray-500 mb-1">Ваше посилання Calendly</label>
+        <input
+          value={calendlyUrl}
+          onChange={(e) => setCalendlyUrl(e.target.value)}
+          placeholder="https://calendly.com/ваш-акаунт/30min"
+          className="border rounded px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-mtp-blue/30"
+        />
+        <button
+          onClick={handleSave}
+          className="mt-3 px-5 py-1.5 bg-mtp-blue text-white text-sm rounded hover:bg-blue-800"
+        >
+          {saved ? "Збережено!" : "Зберегти"}
+        </button>
+      </div>
     </div>
   );
 }

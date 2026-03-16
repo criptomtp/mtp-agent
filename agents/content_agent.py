@@ -73,8 +73,10 @@ class ContentAgent:
         self._api_keys = api_keys or {}
 
     def generate(self, lead: Lead, analysis: Dict[str, Any], output_dir: str,
-                 tariffs=None, brand_style: Optional[Dict[str, str]] = None, niche: str = "") -> Dict[str, str]:
+                 tariffs=None, brand_style: Optional[Dict[str, str]] = None, niche: str = "",
+                 calendly_url: str = "") -> Dict[str, str]:
         """Генерує HTML, PPTX та email.txt. Повертає шляхи до файлів."""
+        self._calendly_url = calendly_url
         os.makedirs(output_dir, exist_ok=True)
 
         html_path = os.path.join(output_dir, "proposal.html")
@@ -192,7 +194,7 @@ class ContentAgent:
         city = getattr(lead, "city", "") or ""
         niche_text = niche or "e-commerce"
         api_base = os.getenv("MTP_API_URL", "https://kp.fulfillmentmtp.com.ua")
-        calendly_url = MTP_COMPANY["calendly"]
+        calendly_url = getattr(self, "_calendly_url", "") or MTP_COMPANY["calendly"]
         tariffs_prompt = get_tariffs_prompt_text()
         clients_text = get_clients_text()
         clients_links = " ".join([f'<a href="{c["url"]}" target="_blank">{c["name"]}</a>' for c in MTP_CLIENTS])
@@ -727,7 +729,7 @@ img { max-width: 100% !important; height: auto !important; }
         mtp_fit = _escape_html(analysis.get("mtp_fit", ""))
         zoom_cta = _escape_html(analysis.get("zoom_cta", "Запишіться на безкоштовну Zoom-консультацію!"))
         client_name = _escape_html(lead.name)
-        calendly_url = MTP_COMPANY.get("calendly", "https://calendly.com/mtpgrouppromo/30min")
+        calendly_url = getattr(self, "_calendly_url", "") or MTP_COMPANY.get("calendly", "https://calendly.com/mtpgrouppromo/30min")
 
         # Pain points HTML
         pains_html = ""

@@ -131,7 +131,16 @@ def test_lead(body: TestLeadIn):
     import tempfile
     output_dir = tempfile.mkdtemp(prefix="mtp_test_")
     content_agent = ContentAgent(api_keys=api_keys)
-    files = content_agent.generate(lead, analysis, output_dir, tariffs=tariffs, niche="e-commerce")
+    # Load calendly URL from user settings
+    calendly_url = ""
+    try:
+        us = db.table("user_settings").select("calendly_url").limit(1).execute()
+        if us.data and us.data[0].get("calendly_url"):
+            calendly_url = us.data[0]["calendly_url"]
+    except Exception:
+        pass
+    files = content_agent.generate(lead, analysis, output_dir, tariffs=tariffs, niche="e-commerce",
+                                   calendly_url=calendly_url)
 
     # Upload HTML presentation if generated
     html_url = None
@@ -209,13 +218,17 @@ def get_user_settings():
     db = get_supabase()
     result = db.table("user_settings").select("*").limit(1).execute()
     if result.data:
-        return result.data[0]
+        data = result.data[0]
+        if not data.get("calendly_url"):
+            data["calendly_url"] = "https://calendly.com/mtpgrouppromo/30min"
+        return data
     return {
         "business_type_id": None,
         "selected_niches": [],
         "ai_model": "gemini-2.0-flash",
         "email_tone": "friendly",
         "language": "uk",
+        "calendly_url": "https://calendly.com/mtpgrouppromo/30min",
     }
 
 

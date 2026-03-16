@@ -61,3 +61,6 @@ FROM bt, (VALUES
   ('Товари для дому', 'home', '🏠', '["товари для дому", "home goods Ukraine"]', 10)
 ) AS n(name, slug, icon, queries, sort)
 ON CONFLICT DO NOTHING;
+
+-- Calendly URL setting
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS calendly_url text DEFAULT 'https://calendly.com/mtpgrouppromo/30min';
