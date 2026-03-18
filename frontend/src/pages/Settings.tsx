@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
-const TABS = ["Pipeline", "Бізнес", "Промпти", "Тест Ліда"] as const;
+const TABS = ["Pipeline", "Бізнес", "Промпти", "Виключення", "Тест Ліда"] as const;
 type Tab = (typeof TABS)[number];
 
 const AGENT_INFO: Record<string, { label: string; desc: string; hasModel: boolean }> = {
@@ -67,6 +67,7 @@ export default function Settings() {
           setSaved={setSaved}
         />
       )}
+      {tab === "Виключення" && <ExclusionsTab />}
       {tab === "Тест Ліда" && <TestLeadTab />}
     </div>
   );
@@ -465,7 +466,105 @@ function BusinessTab() {
   );
 }
 
-/* ─── Tab 3: Тест Ліда ─── */
+/* ─── Tab: Виключення ─── */
+
+function ExclusionsTab() {
+  const BASE = import.meta.env.VITE_API_URL || "";
+  const [domains, setDomains] = useState<{ id: string; domain: string; reason: string }[]>([]);
+  const [newDomain, setNewDomain] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const loadDomains = () => {
+    fetch(`${BASE}/api/settings/excluded-domains`)
+      .then((r) => r.json())
+      .then((data) => {
+        setDomains(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadDomains();
+  }, []);
+
+  const addDomain = async () => {
+    if (!newDomain.trim()) return;
+    await fetch(`${BASE}/api/settings/excluded-domains`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domain: newDomain, reason: "client" }),
+    });
+    setNewDomain("");
+    loadDomains();
+  };
+
+  const removeDomain = async (domain: string, id: string) => {
+    await fetch(`${BASE}/api/settings/excluded-domains/${domain}`, {
+      method: "DELETE",
+    });
+    setDomains((ds) => ds.filter((x) => x.id !== id));
+  };
+
+  if (loading) return <div className="text-gray-500">Завантаження...</div>;
+
+  return (
+    <div className="max-w-2xl">
+      <div className="bg-white rounded-lg shadow p-5">
+        <h3 className="font-semibold text-gray-800 mb-1">Виключені домени</h3>
+        <p className="text-xs text-gray-500 mb-4">
+          Сайти ваших клієнтів або вже оброблених компаній — система їх ігноруватиме при пошуку лідів.
+          Домени додаються автоматично після відправки email.
+        </p>
+
+        <div className="flex gap-2 mb-4">
+          <input
+            value={newDomain}
+            onChange={(e) => setNewDomain(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addDomain()}
+            placeholder="example.com або https://example.com"
+            className="flex-1 border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-mtp-blue/30"
+          />
+          <button
+            onClick={addDomain}
+            className="px-4 py-1.5 bg-mtp-blue text-white rounded text-sm font-medium hover:bg-mtp-blue/90"
+          >
+            + Додати
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {domains.map((d) => (
+            <div
+              key={d.id}
+              className="flex items-center justify-between bg-gray-50 rounded px-3 py-2"
+            >
+              <div>
+                <span className="text-sm font-medium">{d.domain}</span>
+                <span className="ml-2 text-xs text-gray-400">
+                  {d.reason === "client" ? "клієнт" : d.reason === "contacted" ? "відправлено" : d.reason}
+                </span>
+              </div>
+              <button
+                onClick={() => removeDomain(d.domain, d.id)}
+                className="text-red-400 hover:text-red-600 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {domains.length === 0 && (
+            <p className="text-xs text-gray-400 text-center py-4">
+              Список порожній
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Tab: Тест Ліда ─── */
 
 function TestLeadTab() {
   const [form, setForm] = useState({

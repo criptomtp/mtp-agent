@@ -246,6 +246,39 @@ def save_user_settings(settings_data: dict):
     return {"ok": True}
 
 
+# --- Excluded domains ---
+
+
+@router.get("/excluded-domains")
+def get_excluded_domains():
+    db = get_supabase()
+    r = db.table("excluded_domains").select("*").order("added_at", desc=True).execute()
+    return r.data
+
+
+@router.post("/excluded-domains")
+def add_excluded_domain(body: dict):
+    domain = body.get("domain", "").strip().lower()
+    domain = re.sub(r'^https?://', '', domain)
+    domain = re.sub(r'^www\.', '', domain)
+    domain = domain.split('/')[0]
+    if not domain:
+        return {"ok": False, "error": "empty domain"}
+    db = get_supabase()
+    db.table("excluded_domains").upsert(
+        {"domain": domain, "reason": body.get("reason", "client")},
+        on_conflict="domain",
+    ).execute()
+    return {"ok": True, "domain": domain}
+
+
+@router.delete("/excluded-domains/{domain:path}")
+def remove_excluded_domain(domain: str):
+    db = get_supabase()
+    db.table("excluded_domains").delete().eq("domain", domain).execute()
+    return {"ok": True}
+
+
 # --- AI niche suggestions ---
 
 STATIC_NICHES = {

@@ -36,6 +36,23 @@ async def _log(run_id: str, message: str):
     await log_manager.broadcast(line)
 
 
+def _get_excluded_domains() -> set:
+    """Load excluded domains from DB."""
+    try:
+        db = get_supabase()
+        r = db.table("excluded_domains").select("domain").execute()
+        return {row["domain"] for row in r.data}
+    except Exception:
+        return set()
+
+
+def _extract_domain(url: str) -> str:
+    """Extract clean domain from URL."""
+    domain = re.sub(r'^https?://', '', url or '')
+    domain = re.sub(r'^www\.', '', domain)
+    return domain.split('/')[0].lower()
+
+
 def _get_calendly_url() -> str:
     """Load calendly_url from user_settings, fall back to default."""
     try:
@@ -110,9 +127,61 @@ async def run_pipeline(niche: str, count: int) -> dict:
         # 1. Research
         await _agent_progress(run_id, 1, "Research", "running", "Пошук лідів...")
         await _log(run_id, "🔍 Researching leads...")
-        leads = orchestrator.research.search(count, niche=niche)
-        await _agent_progress(run_id, 1, "Research", "done", f"Знайдено {len(leads)} лідів")
-        await _log(run_id, f"Found {len(leads)} leads")
+
+        excluded = _get_excluded_domains()
+        if excluded:
+            await _log(run_id, f"Loaded {len(excluded)} excluded domains")
+
+        raw_leads = orchestrator.research.search(count * 2, niche=niche)
+        await _log(run_id, f"Found {len(raw_leads)} raw leads")
+
+        # Filter: must have email, not excluded
+        leads = []
+        skipped_no_email = 0
+        skipped_excluded = 0
+        seen_domains = set()
+        for lead in raw_leads:
+            domain = _extract_domain(lead.website)
+            if not (lead.email or "").strip():
+                skipped_no_email += 1
+                continue
+            if domain and domain in excluded:
+                skipped_excluded += 1
+                await _log(run_id, f"⏭️ Skipping excluded: {lead.name} ({domain})")
+                continue
+            if domain and domain in seen_domains:
+                continue
+            if domain:
+                seen_domains.add(domain)
+            leads.append(lead)
+            if len(leads) >= count:
+                break
+
+        if skipped_no_email:
+            await _log(run_id, f"⏭️ Skipped {skipped_no_email} leads without email")
+        if skipped_excluded:
+            await _log(run_id, f"⏭️ Skipped {skipped_excluded} excluded domains")
+
+        # If not enough leads, try one more search round
+        if len(leads) < count:
+            extra_needed = count - len(leads)
+            await _log(run_id, f"🔄 Need {extra_needed} more leads, searching again...")
+            extra_raw = orchestrator.research.search(extra_needed * 3, niche=niche)
+            for lead in extra_raw:
+                domain = _extract_domain(lead.website)
+                if not (lead.email or "").strip():
+                    continue
+                if domain and (domain in excluded or domain in seen_domains):
+                    continue
+                if domain:
+                    seen_domains.add(domain)
+                leads.append(lead)
+                if len(leads) >= count:
+                    break
+
+        leads = leads[:count]
+        await _agent_progress(run_id, 1, "Research", "done", f"Знайдено {len(leads)} лідів з email")
+        await _log(run_id, f"Final leads with email: {len(leads)}")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         results_dir = os.path.join(

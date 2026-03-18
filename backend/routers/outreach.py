@@ -202,6 +202,21 @@ def send_lead_email(lead_id: str, body: dict = {}):
             "outreach_status": f"sent:{to_email}",
         }).eq("id", lead_id).execute()
         logger.info(f"[Outreach] Email sent to lead {lead_id} ({to_email})")
+        # Auto-exclude domain after sending
+        try:
+            import re as _re
+            website = data.get("website", "")
+            if website:
+                domain = _re.sub(r'^https?://', '', website)
+                domain = _re.sub(r'^www\.', '', domain).split('/')[0].lower()
+                if domain:
+                    db.table("excluded_domains").upsert(
+                        {"domain": domain, "reason": "contacted"},
+                        on_conflict="domain",
+                    ).execute()
+                    logger.info(f"[Outreach] Auto-excluded domain: {domain}")
+        except Exception as exc:
+            logger.warning(f"[Outreach] Failed to auto-exclude domain: {exc}")
     else:
         db.table("leads").update({
             "outreach_status": f"error:{result.get('error', 'unknown')[:50]}",

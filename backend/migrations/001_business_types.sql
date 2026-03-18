@@ -64,3 +64,12 @@ ON CONFLICT DO NOTHING;
 
 -- Calendly URL setting
 ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS calendly_url text DEFAULT 'https://calendly.com/mtpgrouppromo/30min';
+
+-- Excluded domains (clients, already contacted)
+CREATE TABLE IF NOT EXISTS excluded_domains (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain text UNIQUE NOT NULL,
+    reason text DEFAULT 'client',
+    added_at timestamptz DEFAULT now()
+);
+ALTER TABLE excluded_domains DISABLE ROW LEVEL SECURITY;
