@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
+import Analytics from "./pages/Analytics";
 import Dashboard from "./pages/Dashboard";
 import Leads from "./pages/Leads";
 import Runs from "./pages/Runs";
@@ -15,6 +16,7 @@ export default function App() {
       {/* Dashboard routes with layout */}
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/analytics" element={<Analytics />} />
         <Route path="/leads" element={<Leads />} />
         <Route path="/runs" element={<Runs />} />
         <Route path="/settings" element={<Settings />} />

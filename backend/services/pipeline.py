@@ -236,16 +236,9 @@ async def run_pipeline(niche: str, count: int) -> dict:
                     _l, _a, _d, tariffs=_t, brand_style=_b, niche=_n, calendly_url=_c))
             html_path = files.get("html", "")
             email_path = files.get("email", "")
-            pptx_path = files.get("pptx", "")
-            web_url_detail = f" + web" if files.get("web_url") else ""
-            await _agent_progress(run_id, 3, "Content", "done", f"{progress} {lead_name}: HTML + PPTX + email{web_url_detail}")
-
-            # 4. Outreach
-            await _agent_progress(run_id, 4, "Outreach", "running", f"{progress} Підготовка розсилки: {lead_name}")
-            await _log(run_id, f"{progress} 📧 Processing outreach: {lead_name}")
-            outreach_status = await loop.run_in_executor(
-                None, lambda _l=lead, _d=lead_dir: orchestrator.outreach.process(_l, _d, False))
-            await _agent_progress(run_id, 4, "Outreach", "done", f"{progress} {lead_name}: {outreach_status}")
+            web_url = files.get("web_url", "")
+            web_url_detail = f" + web" if web_url else ""
+            await _agent_progress(run_id, 3, "Content", "done", f"{progress} {lead_name}: HTML + email{web_url_detail}")
 
             # Read email text from file
             email_text = ""
@@ -253,8 +246,31 @@ async def run_pipeline(niche: str, count: int) -> dict:
                 with open(email_path, "r", encoding="utf-8") as f:
                     email_text = f.read()
 
+            # 4. Outreach
+            await _agent_progress(run_id, 4, "Outreach", "running", f"{progress} Підготовка розсилки: {lead_name}")
+            await _log(run_id, f"{progress} 📧 Processing outreach: {lead_name}")
+            outreach_status = await loop.run_in_executor(
+                None, lambda _l=lead, _d=lead_dir: orchestrator.outreach.process(_l, _d, False))
+
+            # Send email via Resend if address found
+            if outreach_status.startswith("ready:") and email_text:
+                to_email = outreach_status.split(":", 1)[1]
+                lines = email_text.split("\n")
+                subject = lines[0].replace("Тема: ", "").strip() if lines else f"Пропозиція від MTP Fulfillment для {lead_name}"
+                body = "\n".join(lines[2:]).strip() if len(lines) > 2 else email_text
+                if web_url:
+                    body = body + f"\n\n📋 Переглянути пропозицію: {web_url}"
+                from backend.services.email_service import send_email
+                send_result = send_email(to=to_email, subject=subject, text=body)
+                if send_result.get("ok"):
+                    outreach_status = f"email_sent:{to_email}"
+                    await _log(run_id, f"{progress} ✉️ Email sent to {to_email}")
+                else:
+                    await _log(run_id, f"{progress} ⚠️ Email failed ({to_email}): {send_result.get('error')}")
+
+            await _agent_progress(run_id, 4, "Outreach", "done", f"{progress} {lead_name}: {outreach_status}")
+
             # Save lead to DB
-            web_url = files.get("web_url", "")
             lead_data = {
                 "run_id": run_id,
                 "name": lead.name,
@@ -284,7 +300,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
             lead_id = lead_record.data[0]["id"]
 
             # Save file records — upload to Supabase Storage, fall back to local URL
-            for file_type, file_path in [("html", html_path), ("email", email_path), ("pptx", pptx_path)]:
+            for file_type, file_path in [("html", html_path), ("email", email_path)]:
                 if not file_path or not os.path.exists(file_path):
                     continue
 
@@ -304,21 +320,6 @@ async def run_pipeline(niche: str, count: int) -> dict:
                         rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
                         file_url = f"/api/runs/files/{rel_path}"
                         await _log(run_id, f"{progress} HTML saved locally: {file_url}")
-
-                elif file_type == "pptx":
-                    storage_path = f"{run_id}/{lead_id}/proposal.pptx"
-                    with open(file_path, "rb") as f:
-                        file_bytes = f.read()
-                    await _log(run_id, f"{progress} Uploading PPTX ({len(file_bytes)} bytes)...")
-                    storage_url = upload_to_storage("proposals", storage_path, file_bytes,
-                                                    content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")
-                    if storage_url:
-                        file_url = storage_url
-                        await _log(run_id, f"{progress} PPTX uploaded to storage")
-                    else:
-                        rel_path = os.path.relpath(os.path.realpath(file_path), project_root)
-                        file_url = f"/api/runs/files/{rel_path}"
-                        await _log(run_id, f"{progress} PPTX saved locally: {file_url}")
 
                 elif file_type == "email":
                     with open(file_path, "r", encoding="utf-8") as f:

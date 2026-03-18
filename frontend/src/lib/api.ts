@@ -82,6 +82,8 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  getAnalytics: () => request<any>("/api/analytics"),
+
   testLead: (lead: {
     name: string;
     city?: string;

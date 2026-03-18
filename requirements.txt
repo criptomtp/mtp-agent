@@ -4,5 +4,4 @@ lxml
 python-dotenv
 google-generativeai
 anthropic
-python-pptx
 resend
