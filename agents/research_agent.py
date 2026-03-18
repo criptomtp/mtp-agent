@@ -140,8 +140,8 @@ class ResearchAgent:
     OLX_SEARCH_URL = "https://www.olx.ua/d/uk/q-{query}/"
     INSTAGRAM_GRAPH_URL = "https://graph.facebook.com/v19.0"
 
-    # All available search channels — Serper (Google API) first, then Prom.ua fallback
-    ALL_CHANNELS = ["serper", "prom", "google", "google_maps", "google_search", "olx", "instagram", "facebook"]
+    # Search channels — Serper (Google API) primary, Google Maps + OLX as supplements
+    ALL_CHANNELS = ["serper", "google_maps", "google_search", "olx"]
 
     def __init__(self, api_keys: Optional[dict] = None, channels: Optional[List[str]] = None):
         self._api_keys = api_keys or {}
@@ -343,7 +343,7 @@ class ResearchAgent:
         if len(leads) < count:
             logger.info(f"[Research] After dedup only {len(leads)}/{count}, trying English fallback")
             try:
-                extra = self._search_serper(count * 2, niche=f"{niche} shop Ukraine")
+                extra = self._search_serper(count * 2, niche=f"{niche} ecommerce Ukraine buy online")
                 for lead in extra:
                     if len(leads) >= count * 2:
                         break
@@ -544,9 +544,12 @@ class ResearchAgent:
         leads = []
         seen_domains: set = set()
         queries = [
-            f"{niche} інтернет магазин Україна",
-            f"{niche} купити оптом Україна",
-            f"{niche} shop Ukraine",
+            f"{niche} інтернет-магазин Україна",
+            f"{niche} купити онлайн Харків Дніпро Одеса Львів",
+            f"{niche} магазин оптом Україна ціна",
+            f"{niche} shop Ukraine online store",
+            f"{niche} виробник постачальник Україна",
+            f"{niche} купити Харків site:*.com.ua OR site:*.ua",
         ]
 
         for query in queries:
