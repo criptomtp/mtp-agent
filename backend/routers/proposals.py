@@ -2,7 +2,6 @@ import base64
 import logging
 import os
 import re
-import httpx
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Request, Header
@@ -15,8 +14,6 @@ from backend.services.database import get_supabase_admin
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 MTP_CABINET_API_SECRET = os.getenv("MTP_CABINET_API_SECRET", "dev-secret")
 MTP_BACKEND_URL = os.getenv("MTP_BACKEND_URL", "https://mtp-agent-production.up.railway.app")
 
@@ -49,33 +46,6 @@ _TRACKING_JS_TPL = """
 """
 
 
-# --- Telegram notifications ---
-
-async def notify_telegram(event_type: str, client_name: str, proposal_url: str = ""):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    messages = {
-        "open":            f"👁 <b>{client_name}</b> відкрив КП\n🕐 {datetime.now().strftime('%H:%M')}\n🔗 {proposal_url}",
-        "email_open":      f"📧 <b>{client_name}</b> відкрив email\n🕐 {datetime.now().strftime('%H:%M')}",
-        "engaged_30s":     f"⏱ <b>{client_name}</b> читає КП вже 30 секунд",
-        "scrolled_to_end": f"📜 <b>{client_name}</b> прочитав КП до кінця!",
-        "calendly_click":  f"📅 <b>{client_name}</b> клікнув на Zoom!",
-        "zoom_booked":     f"🎉 <b>{client_name}</b> ЗАБРОНЮВАВ ZOOM!\nПеревір Google Calendar 📆",
-        "pdf_download":    f"📥 <b>{client_name}</b> завантажив PDF",
-    }
-    text = messages.get(event_type, f"📌 <b>{client_name}</b>: {event_type}")
-    try:
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML",
-                      "disable_web_page_preview": True},
-                timeout=10,
-            )
-    except Exception as e:
-        logger.warning(f"Telegram notify failed: {e}")
-
-
 def _log_open_event(proposal_id: str, ua: str, ref: str):
     """Server-side open tracking — runs in background."""
     try:
@@ -87,23 +57,10 @@ def _log_open_event(proposal_id: str, ua: str, ref: str):
             "ua": ua,
             "ref": ref,
         }).execute()
-        result = db.table("proposals").select(
-            "views_count, client_name, slug"
-        ).eq("id", proposal_id).execute()
-        if result.data:
-            p = result.data[0]
-            new_count = (p.get("views_count") or 0) + 1
-            db.table("proposals").update({
-                "views_count": new_count,
-                "last_viewed_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", proposal_id).execute()
-            # Notify Telegram on every open
-            import asyncio
-            base_url = os.getenv("MTP_FRONTEND_URL", "https://mtp-lead-agent.vercel.app")
-            asyncio.create_task(notify_telegram(
-                "open", p.get("client_name", "?"),
-                f"{base_url}/proposals/{p.get('slug', '')}"
-            ))
+        db.table("proposals").update({
+            "views_count": db.table("proposals").select("views_count").eq("id", proposal_id).execute().data[0].get("views_count", 0) + 1,
+            "last_viewed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", proposal_id).execute()
     except Exception as e:
         logger.warning(f"_log_open_event failed: {e}")
 
@@ -174,16 +131,13 @@ async def pixel_open(slug: str, request: Request, background_tasks: BackgroundTa
     ua = request.headers.get("user-agent", "")
     ref = request.headers.get("referer", "")
 
-    async def _track():
+    def _track():
         try:
             db = get_supabase_admin()
-            result = db.table("proposals").select(
-                "id, client_name, views_count"
-            ).eq("slug", slug).execute()
+            result = db.table("proposals").select("id").eq("slug", slug).execute()
             if not result.data:
                 return
-            p = result.data[0]
-            proposal_id = p["id"]
+            proposal_id = result.data[0]["id"]
             db.table("proposal_events").insert({
                 "proposal_id": proposal_id,
                 "event": "email_open",
@@ -191,7 +145,6 @@ async def pixel_open(slug: str, request: Request, background_tasks: BackgroundTa
                 "ua": ua,
                 "ref": ref,
             }).execute()
-            await notify_telegram("email_open", p.get("client_name", "?"))
         except Exception as e:
             logger.warning(f"pixel_open tracking failed: {e}")
 
@@ -230,11 +183,9 @@ def get_proposal(slug: str, request: Request, background_tasks: BackgroundTasks)
             html_content = cd.get("html_content", "")
 
     if html_content:
-        # Inject engagement tracking JS before serving
         tracked_html = _inject_tracking(html_content, slug)
         return HTMLResponse(content=tracked_html, status_code=200)
 
-    # Otherwise return JSON for React-rendered ProposalPage
     return proposal
 
 
@@ -272,13 +223,5 @@ async def track_event(body: TrackEventIn, request: Request):
         "ua": ua,
         "ref": ref,
     }).execute()
-
-    if body.event in ("scrolled_to_end", "zoom_booked", "calendly_click", "engaged_30s"):
-        try:
-            result = db.table("proposals").select("client_name").eq("id", proposal_id).execute()
-            if result.data and result.data[0].get("client_name"):
-                await notify_telegram(body.event, result.data[0]["client_name"])
-        except Exception:
-            pass
 
     return {"ok": True}
