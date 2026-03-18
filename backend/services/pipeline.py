@@ -257,14 +257,43 @@ async def run_pipeline(niche: str, count: int) -> dict:
                 to_email = outreach_status.split(":", 1)[1]
                 lines = email_text.split("\n")
                 subject = lines[0].replace("Тема: ", "").strip() if lines else f"Пропозиція від MTP Fulfillment для {lead_name}"
-                body = "\n".join(lines[2:]).strip() if len(lines) > 2 else email_text
-                if web_url:
-                    body = body + f"\n\n📋 Переглянути пропозицію: {web_url}"
+                body_text = "\n".join(lines[2:]).strip() if len(lines) > 2 else email_text
+
+                # Build HTML email with tracking pixel + proposal link
+                backend_url = os.getenv("MTP_BACKEND_URL", "https://mtp-agent-production.up.railway.app")
+
+                # Extract slug from web_url for pixel tracking
+                proposal_slug = web_url.split("/api/proposals/")[-1] if web_url and "/api/proposals/" in web_url else ""
+                # Also check frontend URL pattern /proposals/{slug}
+                if not proposal_slug and web_url:
+                    m = re.search(r"/proposals/([^/?#]+)", web_url)
+                    if m:
+                        proposal_slug = m.group(1)
+
+                pixel_html = (
+                    f'<img src="{backend_url}/api/proposals/pixel/{proposal_slug}" '
+                    f'width="1" height="1" style="display:none" alt="">'
+                ) if proposal_slug else ""
+
+                proposal_link_html = (
+                    f'<p style="margin-top:20px"><a href="{web_url}" '
+                    f'style="background:#E8730A;color:#fff;padding:10px 22px;border-radius:6px;'
+                    f'text-decoration:none;font-weight:bold">📋 Переглянути пропозицію →</a></p>'
+                ) if web_url else ""
+
+                html_body = (
+                    f'<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.7;color:#222;max-width:600px">'
+                    f'{body_text.replace(chr(10), "<br>")}'
+                    f'{proposal_link_html}'
+                    f'</div>'
+                    f'{pixel_html}'
+                )
+
                 from backend.services.email_service import send_email
-                send_result = send_email(to=to_email, subject=subject, text=body)
+                send_result = send_email(to=to_email, subject=subject, html=html_body)
                 if send_result.get("ok"):
                     outreach_status = f"email_sent:{to_email}"
-                    await _log(run_id, f"{progress} ✉️ Email sent to {to_email}")
+                    await _log(run_id, f"{progress} ✉️ Email sent to {to_email}" + (" (with pixel)" if pixel_html else ""))
                 else:
                     await _log(run_id, f"{progress} ⚠️ Email failed ({to_email}): {send_result.get('error')}")
 

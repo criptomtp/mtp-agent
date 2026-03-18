@@ -16,6 +16,7 @@ interface AnalyticsData {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const EVENT_META: Record<string, { icon: string; label: string; color: string }> = {
+  email_open:     { icon: "📧", label: "Відкрив email",     color: "#90cdf4" },
   open:           { icon: "👁",  label: "Відкрив КП",       color: "#63b3ed" },
   engaged_30s:    { icon: "⏱",  label: "Читає 30+ сек",    color: "#f6e05e" },
   scrolled_to_end:{ icon: "📜", label: "Дочитав до кінця",  color: "#68d391" },

@@ -54,6 +54,7 @@ def get_analytics():
     zoom_booked = sum(1 for e in events_data if e.get("event") == "zoom_booked")
     engaged_30s = sum(1 for e in events_data if e.get("event") == "engaged_30s")
     scrolled_to_end = sum(1 for e in events_data if e.get("event") == "scrolled_to_end")
+    email_opens = sum(1 for e in events_data if e.get("event") == "email_open")
 
     # ── Rates ──────────────────────────────────────────────────────────────
     email_open_rate = round(proposals_viewed / emails_sent * 100, 1) if emails_sent > 0 else 0
@@ -122,6 +123,7 @@ def get_analytics():
             "zoom_booked": zoom_booked,
             "engaged_30s": engaged_30s,
             "scrolled_to_end": scrolled_to_end,
+            "email_opens": email_opens,
         },
         "funnel": [
             {"label": "Лідів знайдено", "value": total_leads},
