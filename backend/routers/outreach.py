@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import APIRouter
 
@@ -31,7 +32,9 @@ def _strip_signature(text: str) -> str:
         if idx > 0:
             text = text[:idx].strip()
             break
-    return text
+    # Remove placeholder patterns like [Ім'я Власника/ЛПР], [Name], etc.
+    text = re.sub(r'\[.*?\]', '', text)
+    return text.strip()
 
 
 def _build_email_html(lead_name: str, email_text: str, proposal_url: str) -> str:
@@ -204,11 +207,10 @@ def send_lead_email(lead_id: str, body: dict = {}):
         logger.info(f"[Outreach] Email sent to lead {lead_id} ({to_email})")
         # Auto-exclude domain after sending
         try:
-            import re as _re
             website = data.get("website", "")
             if website:
-                domain = _re.sub(r'^https?://', '', website)
-                domain = _re.sub(r'^www\.', '', domain).split('/')[0].lower()
+                domain = re.sub(r'^https?://', '', website)
+                domain = re.sub(r'^www\.', '', domain).split('/')[0].lower()
                 if domain:
                     db.table("excluded_domains").upsert(
                         {"domain": domain, "reason": "contacted"},
