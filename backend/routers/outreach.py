@@ -174,8 +174,17 @@ def send_lead_email(lead_id: str, body: dict = {}):
 
     data = lead.data
     to_email = data.get("email", "").strip()
+
+    # Also try extracting email from outreach_status (e.g. "ready:user@example.com")
     if not to_email:
-        return {"ok": False, "error": "Lead has no email"}
+        st = data.get("outreach_status", "") or ""
+        if ":" in st:
+            candidate = st.split(":", 1)[1].strip()
+            if "@" in candidate:
+                to_email = candidate
+
+    if not to_email:
+        return {"ok": False, "error": "Email не знайдено для цього ліда"}
 
     email_text = body.get("text") or _get_email_text(data)
     proposal_url = data.get("proposal_url", "")
@@ -201,8 +210,9 @@ def send_lead_email(lead_id: str, body: dict = {}):
     )
 
     if result["ok"]:
+        result["email"] = to_email
         db.table("leads").update({
-            "outreach_status": f"sent:{to_email}",
+            "outreach_status": f"email_sent:{to_email}",
         }).eq("id", lead_id).execute()
         logger.info(f"[Outreach] Email sent to lead {lead_id} ({to_email})")
         # Auto-exclude domain after sending

@@ -146,8 +146,8 @@ export default function Leads() {
   }, [selected, reload]);
 
   const handleSendEmail = useCallback(async () => {
-    if (!selected?.email) return;
-    if (!confirm(`Відправити email на ${selected.email} для ${selected.name}?`)) return;
+    if (!selected) return;
+    if (!confirm(`Відправити email для ${selected.name}?`)) return;
     setSending(true);
     try {
       const BASE = import.meta.env.VITE_API_URL || "";
@@ -158,13 +158,14 @@ export default function Leads() {
       });
       const data = await r.json();
       if (data.ok) {
-        setSelected({ ...selected, outreach_status: `sent:${selected.email}` });
+        const sentEmail = data.email || selected.email || "";
+        setSelected({ ...selected, outreach_status: `email_sent:${sentEmail}` });
         reload();
       } else {
         alert(`Помилка: ${data.error}`);
       }
-    } catch (e) {
-      alert(`Помилка відправки`);
+    } catch {
+      alert("Помилка відправки");
     }
     setSending(false);
   }, [selected, reload]);
@@ -437,7 +438,7 @@ export default function Leads() {
                   const alreadySent = st.startsWith("email_sent:") || st.startsWith("sent:") || st === "email_sent";
                   return (
                     <>
-                      {selected.email && !alreadySent && (
+                      {!alreadySent && (
                         <button onClick={handleSendEmail} disabled={sending}
                           className="inline-flex items-center gap-1.5 px-4 py-2 bg-mtp-blue text-white text-sm rounded-lg hover:bg-blue-800 transition font-medium disabled:opacity-50">
                           {sending ? "Відправляю..." : "📧 Надіслати email"}
@@ -453,7 +454,7 @@ export default function Leads() {
                           {copied ? "✅ Скопійовано!" : "📋 Копіювати текст листа"}
                         </button>
                       )}
-                      {selected.email && !alreadySent && (
+                      {!alreadySent && (
                         <button onClick={handleMarkSent} disabled={updatingStatus}
                           className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-50 text-green-700 border border-green-300 text-sm rounded-lg hover:bg-green-100 transition font-medium disabled:opacity-50">
                           {updatingStatus ? "..." : "✅ Позначити відправленим"}
