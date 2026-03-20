@@ -21,15 +21,18 @@ function ScoreBadge({ score, grade, label }: { score: number; grade: string; lab
 
 function OutreachBadge({ status }: { status: string }) {
   if (!status) return null;
-  const isReady = status.startsWith("ready");
-  const isSent = status === "email_sent" || status.startsWith("sent:");
+  const isReady = status.startsWith("ready:");
+  const isSent = status.startsWith("email_sent:") || status.startsWith("sent:") || status === "email_sent";
   const isError = status.startsWith("error:");
   const color = isSent ? "bg-green-100 text-green-700 border-green-300"
     : isReady ? "bg-blue-100 text-blue-700 border-blue-300"
     : isError ? "bg-red-100 text-red-700 border-red-300"
     : "bg-yellow-100 text-yellow-700 border-yellow-300";
   const emoji = isSent ? "✅" : isReady ? "📨" : isError ? "❌" : "✋";
-  const label = isSent ? "відправлено" : isReady ? status.replace("ready:", "") : isError ? "помилка" : status;
+  const email = isSent
+    ? (status.split(":")[1] || "")
+    : isReady ? status.replace("ready:", "") : "";
+  const label = isSent ? `відправлено${email ? ` · ${email}` : ""}` : isReady ? email : isError ? "помилка" : status;
   return (
     <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${color}`}>
       {emoji} {label}
@@ -429,28 +432,36 @@ export default function Leads() {
 
               {/* ── Section 5: Actions ── */}
               <div className="flex items-center gap-3 pt-2 border-t border-gray-200 flex-wrap">
-                {selected.email && !selected.outreach_status?.startsWith("sent:") && selected.outreach_status !== "email_sent" && (
-                  <button onClick={handleSendEmail} disabled={sending}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-mtp-blue text-white text-sm rounded-lg hover:bg-blue-800 transition font-medium disabled:opacity-50">
-                    {sending ? "Відправляю..." : "📧 Відправити email"}
-                  </button>
-                )}
-                {emailText && (
-                  <button onClick={handleCopyEmail}
-                    className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg transition font-medium ${
-                      copied
-                        ? "bg-green-100 text-green-700 border border-green-300"
-                        : "bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100"
-                    }`}>
-                    {copied ? "✅ Скопійовано!" : "📋 Копіювати email текст"}
-                  </button>
-                )}
-                {selected.outreach_status !== "email_sent" && !selected.outreach_status?.startsWith("sent:") && selected.email && (
-                  <button onClick={handleMarkSent} disabled={updatingStatus}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-50 text-green-700 border border-green-300 text-sm rounded-lg hover:bg-green-100 transition font-medium disabled:opacity-50">
-                    {updatingStatus ? "..." : "✅ Позначити як відправлено"}
-                  </button>
-                )}
+                {(() => {
+                  const st = selected.outreach_status || "";
+                  const alreadySent = st.startsWith("email_sent:") || st.startsWith("sent:") || st === "email_sent";
+                  return (
+                    <>
+                      {selected.email && !alreadySent && (
+                        <button onClick={handleSendEmail} disabled={sending}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-mtp-blue text-white text-sm rounded-lg hover:bg-blue-800 transition font-medium disabled:opacity-50">
+                          {sending ? "Відправляю..." : "📧 Надіслати email"}
+                        </button>
+                      )}
+                      {emailText && (
+                        <button onClick={handleCopyEmail}
+                          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg transition font-medium ${
+                            copied
+                              ? "bg-green-100 text-green-700 border border-green-300"
+                              : "bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100"
+                          }`}>
+                          {copied ? "✅ Скопійовано!" : "📋 Копіювати текст листа"}
+                        </button>
+                      )}
+                      {selected.email && !alreadySent && (
+                        <button onClick={handleMarkSent} disabled={updatingStatus}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-50 text-green-700 border border-green-300 text-sm rounded-lg hover:bg-green-100 transition font-medium disabled:opacity-50">
+                          {updatingStatus ? "..." : "✅ Позначити відправленим"}
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
                 <button onClick={close}
                   className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 transition font-medium">
                   Закрити

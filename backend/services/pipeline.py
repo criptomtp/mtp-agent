@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from backend.services.database import get_supabase, get_tariffs, upload_to_storage
 from backend.services.api_keys import get_decrypted_key
+from backend.services.pipeline_settings import load_settings as load_pipeline_settings
 from backend.ws.logs import log_manager
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,11 @@ async def run_pipeline(niche: str, count: int) -> dict:
             await _log(run_id, f"Loaded {len(tariffs)} tariffs from DB")
         else:
             await _log(run_id, "Using hardcoded tariffs (none in DB)")
+
+        # Load pipeline settings (outreach toggle)
+        pipeline_cfg = load_pipeline_settings()
+        auto_send_email = pipeline_cfg.get("agents", {}).get("outreach", {}).get("enabled", False)
+        await _log(run_id, f"Auto email send: {'ON' if auto_send_email else 'OFF'}")
 
         # Load calendly URL from user settings
         calendly_url = _get_calendly_url()
@@ -252,8 +258,8 @@ async def run_pipeline(niche: str, count: int) -> dict:
             outreach_status = await loop.run_in_executor(
                 None, lambda _l=lead, _d=lead_dir: orchestrator.outreach.process(_l, _d, False))
 
-            # Send email via Resend if address found
-            if outreach_status.startswith("ready:") and email_text:
+            # Send email via Resend if address found AND auto-send is enabled in Settings
+            if auto_send_email and outreach_status.startswith("ready:") and email_text:
                 to_email = outreach_status.split(":", 1)[1]
                 lines = email_text.split("\n")
                 subject = lines[0].replace("Тема: ", "").strip() if lines else f"Пропозиція від MTP Fulfillment для {lead_name}"

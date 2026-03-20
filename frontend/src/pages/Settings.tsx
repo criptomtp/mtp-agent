@@ -8,7 +8,7 @@ const AGENT_INFO: Record<string, { label: string; desc: string; hasModel: boolea
   research: { label: "Research Agent", desc: "Пошук лідів через Google Maps, Prom.ua", hasModel: false },
   analysis: { label: "Analysis Agent", desc: "AI аналіз компанії та генерація пропозиції", hasModel: true },
   content: { label: "Content Agent", desc: "Генерація PDF та email", hasModel: true },
-  outreach: { label: "Outreach Agent", desc: "Відправка email та контакт", hasModel: false },
+  outreach: { label: "Outreach Agent", desc: "Автоматична відправка email лідам під час пайплайну", hasModel: false },
 };
 
 export default function Settings() {
