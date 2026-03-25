@@ -269,12 +269,80 @@ class ResearchAgent:
         ),
     ]
 
+    def _load_db_dedup_sets(self) -> tuple:
+        """Load existing leads from DB ONCE for deduplication. Returns (domains, phones, emails, names, count)."""
+        try:
+            from backend.services.database import get_supabase
+            db = get_supabase()
+            existing = (
+                db.table("leads")
+                .select("name,website,phone,email")
+                .order("created_at", desc=True)
+                .limit(2000)
+                .execute()
+            )
+            domains = set()
+            phones = set()
+            emails = set()
+            names = []
+            for r in existing.data:
+                if r.get("website"):
+                    d = self._extract_domain(r["website"])
+                    if d:
+                        domains.add(d)
+                if r.get("phone"):
+                    phones.add(r["phone"])
+                if r.get("email"):
+                    emails.add(r["email"])
+                if r.get("name"):
+                    names.append(_normalize_name(r["name"]))
+            record_count = len(existing.data)
+            del existing  # Free raw data
+            return domains, phones, emails, names[:500], record_count
+        except Exception as e:
+            logger.warning(f"[Research] Failed to load DB dedup data: {e}")
+            return set(), set(), set(), [], 0
+
+    def _filter_with_dedup_sets(self, leads: List[Lead], db_domains: set, db_phones: set,
+                                 db_emails: set, db_names: list) -> List[Lead]:
+        """Filter leads against pre-loaded DB dedup sets (no additional DB queries)."""
+        filtered = []
+        for lead in leads:
+            is_duplicate = False
+            reason = ""
+            if lead.website:
+                domain = self._extract_domain(lead.website)
+                if domain and domain in db_domains:
+                    is_duplicate, reason = True, f"domain {domain}"
+            if not is_duplicate and lead.phone and lead.phone in db_phones:
+                is_duplicate, reason = True, "phone"
+            if not is_duplicate and lead.email and lead.email in db_emails:
+                is_duplicate, reason = True, "email"
+            if not is_duplicate and lead.name:
+                norm = _normalize_name(lead.name)
+                for ex_name in db_names:
+                    if self._name_similarity(norm, ex_name) > 0.80:
+                        is_duplicate, reason = True, f"name ~'{ex_name}'"
+                        break
+            if is_duplicate:
+                logger.info(f"[Research] Пропускаємо дублікат ({reason}): {lead.name}")
+            else:
+                filtered.append(lead)
+        skipped = len(leads) - len(filtered)
+        if skipped:
+            logger.info(f"[Research] Після дедуплікації: {len(filtered)}/{len(leads)} (skipped {skipped})")
+        return filtered
+
     def search(self, count: int = 5, niche: str = "косметика", channels: Optional[List[str]] = None) -> List[Lead]:
         """Шукає лідів з вибраних джерел, повертає до count результатів."""
         active_channels = channels or self._channels
         leads: List[Lead] = []
         seen_names: set = set()
         seen_domains: set = set()
+
+        # Load DB dedup data ONCE (was called 3-4 times before, each fetching 2000 records)
+        db_domains, db_phones, db_emails, db_names, db_count = self._load_db_dedup_sets()
+        logger.info(f"[Research] Loaded {db_count} DB records for dedup (once)")
 
         def _add_lead(lead: Lead) -> bool:
             norm = _normalize_name(lead.name)
@@ -334,9 +402,9 @@ class ResearchAgent:
                 except Exception as e:
                     logger.warning(f"[ResearchAgent] Channel {channel} failed: {e}")
 
-        # Deduplicate against existing leads in DB
+        # Deduplicate against existing leads in DB (using pre-loaded sets)
         logger.info(f"[Research] Before DB dedup: {len(leads)} leads")
-        leads = self._filter_already_contacted(leads)
+        leads = self._filter_with_dedup_sets(leads, db_domains, db_phones, db_emails, db_names)
         logger.info(f"[Research] After DB dedup: {len(leads)} leads")
 
         # After dedup, if not enough — try extra English query
@@ -349,7 +417,7 @@ class ResearchAgent:
                         break
                     _add_lead(lead)
                 logger.info(f"[Research] Before English fallback dedup: {len(leads)} leads")
-                leads = self._filter_already_contacted(leads)
+                leads = self._filter_with_dedup_sets(leads, db_domains, db_phones, db_emails, db_names)
                 logger.info(f"[Research] After English fallback dedup: {len(leads)} leads")
             except Exception as e:
                 logger.warning(f"[ResearchAgent] English fallback failed: {e}")
@@ -361,7 +429,7 @@ class ResearchAgent:
                 needed = max(count - len(leads), count)  # ask for more since DB dedup will filter some
                 gemini_leads = self._generate_leads_gemini(needed, niche)
                 logger.info(f"[Research] Before Gemini fallback dedup: {len(gemini_leads)} leads")
-                gemini_leads = self._filter_already_contacted(gemini_leads)
+                gemini_leads = self._filter_with_dedup_sets(gemini_leads, db_domains, db_phones, db_emails, db_names)
                 logger.info(f"[Research] After Gemini fallback dedup: {len(gemini_leads)} leads")
                 _add_leads(gemini_leads)
             except Exception as e:
@@ -370,7 +438,7 @@ class ResearchAgent:
         # Static fallback only if still short
         if len(leads) < count:
             logger.info(f"[Research] Before static fallback dedup: {len(self.FALLBACK_LEADS)} fallback leads")
-            fallback_pool = self._filter_already_contacted(list(self.FALLBACK_LEADS))
+            fallback_pool = self._filter_with_dedup_sets(list(self.FALLBACK_LEADS), db_domains, db_phones, db_emails, db_names)
             logger.info(f"[Research] After static fallback dedup: {len(fallback_pool)} fallback leads")
             random.shuffle(fallback_pool)
             for lead in fallback_pool:
@@ -480,74 +548,8 @@ class ResearchAgent:
             return max(overlap, 0.85)
         return overlap
 
-    def _filter_already_contacted(self, leads: List[Lead]) -> List[Lead]:
-        """Filter out leads that already exist in the DB (by website domain, phone, email, or fuzzy name).
-        Limits DB query to last 2000 records to avoid loading entire table into memory."""
-        try:
-            from backend.services.database import get_supabase
-            db = get_supabase()
-            # Limit to last 2000 records to cap memory usage (~512MB Railway limit)
-            existing = (
-                db.table("leads")
-                .select("name,website,phone,email")
-                .order("created_at", desc=True)
-                .limit(2000)
-                .execute()
-            )
-            existing_domains = set()
-            existing_phones = set()
-            existing_emails = set()
-            existing_names = []
-            for r in existing.data:
-                if r.get("website"):
-                    d = self._extract_domain(r["website"])
-                    if d:
-                        existing_domains.add(d)
-                if r.get("phone"):
-                    existing_phones.add(r["phone"])
-                if r.get("email"):
-                    existing_emails.add(r["email"])
-                if r.get("name"):
-                    existing_names.append(_normalize_name(r["name"]))
-            # Free raw data immediately
-            record_count = len(existing.data)
-            del existing
-
-            filtered = []
-            for lead in leads:
-                is_duplicate = False
-                reason = ""
-
-                # 1. Domain match
-                if lead.website:
-                    domain = self._extract_domain(lead.website)
-                    if domain and domain in existing_domains:
-                        is_duplicate, reason = True, f"domain {domain}"
-                # 2. Phone match
-                if not is_duplicate and lead.phone and lead.phone in existing_phones:
-                    is_duplicate, reason = True, "phone"
-                # 3. Email match
-                if not is_duplicate and lead.email and lead.email in existing_emails:
-                    is_duplicate, reason = True, "email"
-                # 4. Fuzzy name match (>80% similarity) — limit to first 500 names for speed
-                if not is_duplicate and lead.name:
-                    norm = _normalize_name(lead.name)
-                    for ex_name in existing_names[:500]:
-                        if self._name_similarity(norm, ex_name) > 0.80:
-                            is_duplicate, reason = True, f"name ~'{ex_name}'"
-                            break
-
-                if is_duplicate:
-                    logger.info(f"[Research] Пропускаємо дублікат ({reason}): {lead.name}")
-                else:
-                    filtered.append(lead)
-
-            skipped = len(leads) - len(filtered)
-            logger.info(f"[Research] Після дедуплікації: {len(filtered)}/{len(leads)} нових лідів (DB checked {record_count} records, skipped {skipped})")
-            return filtered
-        except Exception as e:
-            logger.warning(f"[Research] Дедуплікація не вдалась: {e}")
-            return leads
+    # _filter_already_contacted removed — replaced by _load_db_dedup_sets + _filter_with_dedup_sets
+    # to avoid fetching 2000 DB records 3-4 times per search() call
 
     # ── Serper.dev Google Search API ──────────────────────────────
 

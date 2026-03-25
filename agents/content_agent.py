@@ -98,16 +98,9 @@ class ContentAgent:
             except Exception as e:
                 logger.error(f"Web proposal fallback also failed: {e}", exc_info=True)
 
-        # Overwrite local proposal.html with Gemini HTML if available
-        if web_proposal and web_proposal.get("html_content"):
-            with open(html_path, "w", encoding="utf-8") as f:
-                f.write(web_proposal["html_content"])
-            logger.info(f"[ContentAgent] Overwrote proposal.html with Gemini HTML")
-
         result = {"html": html_path, "email": email_path}
         if web_proposal:
             result["web_url"] = web_proposal["url"]
-            result["web_proposal"] = web_proposal
         return result
 
     def _validate_html(self, html: str, brand_primary: str = "") -> tuple:
@@ -390,7 +383,8 @@ img { max-width: 100% !important; height: auto !important; }
 
             proposal_url = f"{api_base}/api/proposals/{slug}"
             logger.info(f"[ContentAgent] Web proposal ready: {proposal_url}")
-            return {"slug": slug, "url": proposal_url, "proposal_id": slug, "html_content": html}
+            # Don't return html_content in dict — it's 50-100KB and stays in memory via pipeline.py
+            return {"slug": slug, "url": proposal_url, "proposal_id": slug}
 
         except Exception as e:
             logger.error(f"[ContentAgent] Proposal save failed: {e}", exc_info=True)

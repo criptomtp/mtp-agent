@@ -187,6 +187,10 @@ async def run_pipeline(niche: str, count: int) -> dict:
                     break
 
         leads = leads[:count]
+        # Free research data no longer needed
+        del raw_leads, seen_domains, excluded
+        gc.collect()
+
         await _agent_progress(run_id, 1, "Research", "done", f"Знайдено {len(leads)} лідів з email")
         await _log(run_id, f"Final leads with email: {len(leads)}")
 
@@ -373,9 +377,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
                 ).execute()
 
             # Free large objects to reduce memory pressure
-            del brand_style, analysis, files, email_text
-            if 'file_bytes' in dir():
-                del file_bytes
+            del brand_style, analysis, files, email_text, lead_data
 
             await _log(run_id, f"{progress} Done: {lead_name} ({outreach_status})")
 
@@ -389,6 +391,10 @@ async def run_pipeline(niche: str, count: int) -> dict:
         await _agent_progress(run_id, 2, "Analysis", "done", f"Оброблено {len(leads)} лідів")
         await _agent_progress(run_id, 3, "Content", "done", f"Згенеровано {len(leads)} КП")
         await _agent_progress(run_id, 4, "Outreach", "done", f"Готово {len(leads)} лідів")
+
+        # Free orchestrator and agents after pipeline completes
+        del orchestrator, style_agent
+        gc.collect()
 
         await _log(run_id, "Pipeline completed!")
 

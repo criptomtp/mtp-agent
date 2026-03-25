@@ -14,6 +14,6 @@ COPY . .
 EXPOSE 8000
 
 # --workers 1: single worker for Railway free tier (~512MB RAM)
-# --limit-max-requests 200: auto-restart worker after 200 requests to reclaim leaked memory
+# --limit-max-requests 1000: auto-restart worker after 1000 requests to reclaim leaked memory
 # --timeout-keep-alive 30: close idle connections sooner
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --limit-max-requests 200 --timeout-keep-alive 30"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --limit-max-requests 1000 --timeout-keep-alive 30"]

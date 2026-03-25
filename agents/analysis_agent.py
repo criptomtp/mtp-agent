@@ -69,9 +69,11 @@ def _scrape_cooperation_page(url: str) -> str:
             )
             if resp.status_code == 200 and len(resp.text) > 500:
                 soup = BeautifulSoup(resp.text, "lxml")
+                del resp  # Free response
                 for tag in soup(["script", "style", "nav", "footer", "header"]):
                     tag.decompose()
                 text = soup.get_text(separator=" ", strip=True)[:1500]
+                del soup  # Free soup
                 if any(kw in text.lower() for kw in ["партнер", "співпраця", "оптов", "b2b", "дропшип", "wholesale"]):
                     logger.info(f"  [AnalysisAgent] Found cooperation page: {base + path}")
                     return text

@@ -32,22 +32,30 @@ app.include_router(settings_router.router)
 @app.get("/api/health")
 def health():
     import os
-    # Report memory usage for Railway monitoring
     mem_mb = None
+    mem_percent = None
     try:
-        import resource
-        mem_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        # macOS returns bytes, Linux returns KB
-        if os.uname().sysname == "Darwin":
-            mem_mb = round(mem_kb / 1024 / 1024, 1)
-        else:
-            mem_mb = round(mem_kb / 1024, 1)
+        import psutil
+        process = psutil.Process(os.getpid())
+        mem = process.memory_info()
+        mem_mb = round(mem.rss / 1024 / 1024, 1)
+        mem_percent = round(process.memory_percent(), 1)
     except Exception:
-        pass
+        # Fallback if psutil not available
+        try:
+            import resource
+            mem_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if os.uname().sysname == "Darwin":
+                mem_mb = round(mem_kb / 1024 / 1024, 1)
+            else:
+                mem_mb = round(mem_kb / 1024, 1)
+        except Exception:
+            pass
     return {
         "status": "ok",
         "storage_ready": bool(settings.SUPABASE_SERVICE_KEY),
         "memory_mb": mem_mb,
+        "memory_percent": mem_percent,
     }
 
 

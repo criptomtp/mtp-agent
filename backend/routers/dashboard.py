@@ -1,4 +1,5 @@
 import asyncio
+import gc
 
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
@@ -37,11 +38,13 @@ async def _run_niches_sequentially(niches: list[str], count: int):
     """Run pipelines one by one to avoid API rate limits."""
     for niche in niches:
         await run_pipeline(niche, count)
+        gc.collect()  # Free memory between niches
 
 
 @router.post("/run")
-async def start_run(body: RunAgentsIn, background_tasks: BackgroundTasks):
+async def start_run(body: RunAgentsIn):
     # Support both single niche and batch of niches
     niches = [n.strip() for n in body.niches if n.strip()] if body.niches else [body.niche]
-    background_tasks.add_task(asyncio.run, _run_niches_sequentially(niches, body.count))
+    # Run in background using asyncio.create_task (uses existing event loop, not asyncio.run which creates a new one)
+    asyncio.create_task(_run_niches_sequentially(niches, body.count))
     return {"status": "started", "niches": niches, "count": body.count}
