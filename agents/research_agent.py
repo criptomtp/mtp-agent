@@ -553,34 +553,47 @@ class ResearchAgent:
 
     # ── Serper.dev Google Search API ──────────────────────────────
 
-    def _search_serper(self, count: int, niche: str = "косметика") -> List[Lead]:
-        """Search via Serper.dev API (Google results, free tier 2500 req/month)."""
+    def _search_serper(self, count: int, niche: str = "косметика", page: int = 1,
+                       query_override: str = "") -> List[Lead]:
+        """Search via Serper.dev API (Google results, free tier 2500 req/month).
+
+        Args:
+            page: Serper API page number (1-based). Each page = 10 results with num=10, or up to 100.
+            query_override: If set, use this exact query instead of generating from niche.
+        """
         from urllib.parse import urlparse
 
         api_key = self._api_keys.get("SERPER_API_KEY") or os.getenv("SERPER_API_KEY", "")
         if not api_key:
             logger.warning("[ResearchAgent] SERPER_API_KEY not set — add it to Railway env vars. Skipping Serper.")
             return []
-        logger.info(f"[ResearchAgent] Using Serper API (key: {api_key[:8]}...)")
+        logger.info(f"[ResearchAgent] Using Serper API (key: {api_key[:8]}...) page={page}")
 
         leads = []
         seen_domains: set = set()
-        queries = [
-            f"{niche} інтернет-магазин Україна",
-            f"{niche} купити онлайн Харків Дніпро Одеса Львів",
-            f"{niche} магазин оптом Україна ціна",
-            f"{niche} shop Ukraine online store",
-            f"{niche} виробник постачальник Україна",
-            f"{niche} купити Харків site:*.com.ua OR site:*.ua",
-        ]
+
+        if query_override:
+            queries = [query_override]
+        else:
+            queries = [
+                f"{niche} інтернет-магазин Україна",
+                f"{niche} купити онлайн Харків Дніпро Одеса Львів",
+                f"{niche} магазин оптом Україна ціна",
+                f"{niche} shop Ukraine online store",
+                f"{niche} виробник постачальник Україна",
+                f"{niche} купити Харків site:*.com.ua OR site:*.ua",
+            ]
 
         for query in queries:
             if len(leads) >= count:
                 break
             try:
+                serper_payload = {"q": query, "gl": "ua", "hl": "uk", "num": 20}
+                if page > 1:
+                    serper_payload["page"] = page
                 resp = requests.post(
                     "https://google.serper.dev/search",
-                    json={"q": query, "gl": "ua", "hl": "uk", "num": 20},
+                    json=serper_payload,
                     headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
                     timeout=10,
                 )

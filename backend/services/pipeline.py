@@ -131,68 +131,113 @@ async def run_pipeline(niche: str, count: int) -> dict:
 
         orchestrator = Orchestrator(send_email=False, api_keys=api_keys, tariffs=tariffs)
 
-        # 1. Research
+        # 1. Research — persistent loop until target_count reached
         await _agent_progress(run_id, 1, "Research", "running", "Пошук лідів...")
         await _log(run_id, "🔍 Researching leads...")
 
+        # Build full exclusion set: excluded_domains + all existing leads in DB
         excluded = _get_excluded_domains()
-        if excluded:
-            await _log(run_id, f"Loaded {len(excluded)} excluded domains")
+        try:
+            existing_leads_res = db.table("leads").select("website").order("created_at", desc=True).limit(5000).execute()
+            existing_lead_domains = set()
+            for row in existing_leads_res.data:
+                if row.get("website"):
+                    d = _extract_domain(row["website"])
+                    if d:
+                        existing_lead_domains.add(d)
+            del existing_leads_res  # Free raw data
+        except Exception as e:
+            logger.warning(f"Failed to load existing lead domains: {e}")
+            existing_lead_domains = set()
 
-        raw_leads = orchestrator.research.search(count * 2, niche=niche)
-        await _log(run_id, f"Found {len(raw_leads)} raw leads")
+        all_excluded = excluded | existing_lead_domains
+        await _log(run_id, f"Total excluded domains: {len(all_excluded)} (excluded_domains={len(excluded)}, existing_leads={len(existing_lead_domains)})")
 
-        # Filter: must have email, not excluded
+        # Parse niche as multiple queries (comma or newline separated)
+        queries = [q.strip() for q in niche.replace('\n', ',').split(',') if q.strip()]
+        if not queries:
+            queries = [niche]
+        await _log(run_id, f"Search queries: {queries}")
+
+        # Persistent search loop
         leads = []
-        skipped_no_email = 0
-        skipped_excluded = 0
         seen_domains = set()
-        for lead in raw_leads:
-            domain = _extract_domain(lead.website)
-            if not (lead.email or "").strip():
-                skipped_no_email += 1
-                continue
-            if domain and domain in excluded:
-                skipped_excluded += 1
-                await _log(run_id, f"⏭️ Skipping excluded: {lead.name} ({domain})")
-                continue
-            if domain and domain in seen_domains:
-                continue
-            if domain:
-                seen_domains.add(domain)
-            leads.append(lead)
+        MAX_SEARCH_ROUNDS = 10
+        search_round = 0
+
+        for query in queries:
             if len(leads) >= count:
                 break
 
-        if skipped_no_email:
-            await _log(run_id, f"⏭️ Skipped {skipped_no_email} leads without email")
-        if skipped_excluded:
-            await _log(run_id, f"⏭️ Skipped {skipped_excluded} excluded domains")
+            page = 1
+            consecutive_zero_new = 0
 
-        # If not enough leads, try one more search round
-        if len(leads) < count:
-            extra_needed = count - len(leads)
-            await _log(run_id, f"🔄 Need {extra_needed} more leads, searching again...")
-            extra_raw = orchestrator.research.search(extra_needed * 3, niche=niche)
-            for lead in extra_raw:
-                domain = _extract_domain(lead.website)
-                if not (lead.email or "").strip():
-                    continue
-                if domain and (domain in excluded or domain in seen_domains):
-                    continue
-                if domain:
-                    seen_domains.add(domain)
-                leads.append(lead)
-                if len(leads) >= count:
+            while len(leads) < count and search_round < MAX_SEARCH_ROUNDS:
+                search_round += 1
+                remaining = count - len(leads)
+
+                await _log(run_id, f"🔍 Round {search_round}: query='{query}', page={page}, need {remaining} more leads")
+                await _agent_progress(run_id, 1, "Research", "running",
+                                      f"Round {search_round}: '{query[:30]}...' need {remaining}")
+
+                raw_leads = orchestrator.research.search(
+                    min(remaining * 3, 100),
+                    niche=query,
+                )
+                # Also try paginated Serper directly for page > 1
+                if page > 1:
+                    try:
+                        extra_serper = orchestrator.research._search_serper(
+                            remaining * 3, niche=query, page=page, query_override=f"{query} інтернет-магазин Україна")
+                        raw_leads = raw_leads + extra_serper
+                    except Exception as e:
+                        logger.warning(f"Serper page {page} failed: {e}")
+
+                if not raw_leads:
+                    await _log(run_id, f"⚠️ No results for query '{query}' page {page}, moving to next query")
                     break
 
+                # Filter: must have email, not in excluded/seen
+                new_in_round = 0
+                skipped_no_email = 0
+                skipped_excluded = 0
+                for lead in raw_leads:
+                    domain = _extract_domain(lead.website)
+                    if not (lead.email or "").strip():
+                        skipped_no_email += 1
+                        continue
+                    if domain and (domain in all_excluded or domain in seen_domains):
+                        skipped_excluded += 1
+                        continue
+                    if domain:
+                        seen_domains.add(domain)
+                        all_excluded.add(domain)  # Don't find again in next rounds
+                    leads.append(lead)
+                    new_in_round += 1
+                    if len(leads) >= count:
+                        break
+
+                await _log(run_id, f"  → Got {len(raw_leads)} results, {new_in_round} new (skipped: {skipped_no_email} no email, {skipped_excluded} excluded), total: {len(leads)}/{count}")
+                del raw_leads  # Free
+
+                if new_in_round == 0:
+                    consecutive_zero_new += 1
+                    if consecutive_zero_new >= 2:
+                        await _log(run_id, f"⚠️ 2 pages with 0 new leads for '{query}', moving to next query")
+                        break
+                else:
+                    consecutive_zero_new = 0
+
+                page += 1
+
         leads = leads[:count]
-        # Free research data no longer needed
-        del raw_leads, seen_domains, excluded
+
+        # Free research data
+        del seen_domains, all_excluded, excluded, existing_lead_domains
         gc.collect()
 
         await _agent_progress(run_id, 1, "Research", "done", f"Знайдено {len(leads)} лідів з email")
-        await _log(run_id, f"Final leads with email: {len(leads)}")
+        await _log(run_id, f"✅ Research complete: {len(leads)} leads found from {search_round} search rounds")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         results_dir = os.path.join(
