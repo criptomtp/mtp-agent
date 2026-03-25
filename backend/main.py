@@ -31,9 +31,23 @@ app.include_router(settings_router.router)
 @app.get("/health")
 @app.get("/api/health")
 def health():
+    import os
+    # Report memory usage for Railway monitoring
+    mem_mb = None
+    try:
+        import resource
+        mem_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # macOS returns bytes, Linux returns KB
+        if os.uname().sysname == "Darwin":
+            mem_mb = round(mem_kb / 1024 / 1024, 1)
+        else:
+            mem_mb = round(mem_kb / 1024, 1)
+    except Exception:
+        pass
     return {
         "status": "ok",
         "storage_ready": bool(settings.SUPABASE_SERVICE_KEY),
+        "memory_mb": mem_mb,
     }
 
 

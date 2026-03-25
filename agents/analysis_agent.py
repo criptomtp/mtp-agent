@@ -167,7 +167,7 @@ def _scrape_website(url: str) -> Dict[str, Any]:
         # Clean text excerpt
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
-        text = soup.get_text(separator=" ", strip=True)[:2000]
+        text = soup.get_text(separator=" ", strip=True)[:1500]
 
         # Tone detection (informal vs formal)
         informal_words = ["ти ", "твій", "твоя", "твоє", "обирай", "замовляй", "спробуй", "дивись"]
@@ -182,6 +182,9 @@ def _scrape_website(url: str) -> Dict[str, Any]:
 
         # Scrape cooperation/partnership page for personalization
         cooperation_text = _scrape_cooperation_page(url)
+
+        # Free large objects before returning
+        del soup, html, resp
 
         return {
             "title": title,
@@ -355,12 +358,16 @@ class AnalysisAgent:
         settings = self._load_pipeline_settings()
         model_name = settings.get("agents", {}).get("analysis", {}).get("model", "gemini-2.5-flash")
         custom_prompts = settings.get("prompts", {})
+        del settings  # Free settings dict
 
         result = self._try_gemini(lead, tariffs_text, website_data, model_name=model_name, custom_prompts=custom_prompts, niche=niche)
         if not result:
             result = self._try_claude(lead, tariffs_text, website_data, custom_prompts=custom_prompts, niche=niche)
         if not result:
             result = self._fallback_analysis(lead, niche=niche)
+
+        # Free scraped data — no longer needed
+        del website_data, tariffs_text
 
         scoring = score_lead(lead, result)
         result["score"] = scoring["score"]
@@ -413,9 +420,12 @@ class AnalysisAgent:
             model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
             response = model.generate_content(user_prompt)
             text = response.text.strip()
+            del response, model  # Free AI objects
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            return json.loads(text)
+            result = json.loads(text)
+            del text
+            return result
         except Exception as e:
             print(f"  [AnalysisAgent] Gemini помилка: {e}")
             return None
@@ -438,9 +448,12 @@ class AnalysisAgent:
                 messages=[{"role": "user", "content": user_prompt}],
             )
             text = message.content[0].text.strip()
+            del message, client  # Free API objects
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            return json.loads(text)
+            result = json.loads(text)
+            del text
+            return result
         except Exception as e:
             print(f"  [AnalysisAgent] Claude помилка: {e}")
             return None

@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import json
 import logging
 import os
@@ -348,6 +349,7 @@ async def run_pipeline(niche: str, count: int) -> dict:
                         file_bytes = f.read()
                     await _log(run_id, f"{progress} Uploading HTML ({len(file_bytes)} bytes)...")
                     storage_url = upload_to_storage("proposals", storage_path, file_bytes, content_type="text/html; charset=utf-8")
+                    del file_bytes  # Free immediately after upload
                     if storage_url:
                         file_url = storage_url
                         await _log(run_id, f"{progress} HTML uploaded to storage")
@@ -370,10 +372,17 @@ async def run_pipeline(niche: str, count: int) -> dict:
                     }
                 ).execute()
 
+            # Free large objects to reduce memory pressure
+            del brand_style, analysis, files, email_text
+            if 'file_bytes' in dir():
+                del file_bytes
+
             await _log(run_id, f"{progress} Done: {lead_name} ({outreach_status})")
 
-        # Process all leads concurrently
-        await asyncio.gather(*[process_lead(i, lead) for i, lead in enumerate(leads)])
+        # Process leads sequentially to limit peak memory usage (Railway ~512MB RAM)
+        for i, lead in enumerate(leads):
+            await process_lead(i, lead)
+            gc.collect()  # Free memory after each lead
 
         # Final progress events so dashboard shows completed state
         await _agent_progress(run_id, 1, "Research", "done", f"Знайдено {len(leads)} лідів")

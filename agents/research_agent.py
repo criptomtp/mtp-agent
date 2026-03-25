@@ -420,6 +420,7 @@ class ResearchAgent:
 
             response = model.generate_content(prompt)
             text = response.text.strip()
+            del response, model, prompt  # Free AI objects
             # Strip markdown code blocks if present
             if text.startswith("```"):
                 text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -428,6 +429,7 @@ class ResearchAgent:
             text = text.strip()
 
             data = _json.loads(text)
+            del text
             leads = []
             for item in data:
                 leads.append(Lead(
@@ -440,6 +442,7 @@ class ResearchAgent:
                     products_count=item.get("products_count", 0),
                     source="gemini",
                 ))
+            del data
             logger.info(f"[ResearchAgent] Gemini generated {len(leads)} leads for '{niche}'")
             return leads
 
@@ -478,41 +481,58 @@ class ResearchAgent:
         return overlap
 
     def _filter_already_contacted(self, leads: List[Lead]) -> List[Lead]:
-        """Filter out leads that already exist in the DB (by website domain, phone, email, or fuzzy name)."""
+        """Filter out leads that already exist in the DB (by website domain, phone, email, or fuzzy name).
+        Limits DB query to last 2000 records to avoid loading entire table into memory."""
         try:
             from backend.services.database import get_supabase
             db = get_supabase()
-            existing = db.table("leads").select("name,website,phone,email").execute()
-            existing_websites = {r["website"] for r in existing.data if r.get("website")}
-            existing_domains = {self._extract_domain(r["website"]) for r in existing.data if r.get("website")}
-            existing_domains.discard("")
-            existing_phones = {r["phone"] for r in existing.data if r.get("phone")}
-            existing_emails = {r["email"] for r in existing.data if r.get("email")}
-            existing_names = [_normalize_name(r["name"]) for r in existing.data if r.get("name")]
+            # Limit to last 2000 records to cap memory usage (~512MB Railway limit)
+            existing = (
+                db.table("leads")
+                .select("name,website,phone,email")
+                .order("created_at", desc=True)
+                .limit(2000)
+                .execute()
+            )
+            existing_domains = set()
+            existing_phones = set()
+            existing_emails = set()
+            existing_names = []
+            for r in existing.data:
+                if r.get("website"):
+                    d = self._extract_domain(r["website"])
+                    if d:
+                        existing_domains.add(d)
+                if r.get("phone"):
+                    existing_phones.add(r["phone"])
+                if r.get("email"):
+                    existing_emails.add(r["email"])
+                if r.get("name"):
+                    existing_names.append(_normalize_name(r["name"]))
+            # Free raw data immediately
+            record_count = len(existing.data)
+            del existing
 
             filtered = []
             for lead in leads:
                 is_duplicate = False
                 reason = ""
 
-                # 1. Exact website match
-                if lead.website and lead.website in existing_websites:
-                    is_duplicate, reason = True, "website exact"
-                # 2. Domain match
-                elif lead.website:
+                # 1. Domain match
+                if lead.website:
                     domain = self._extract_domain(lead.website)
                     if domain and domain in existing_domains:
                         is_duplicate, reason = True, f"domain {domain}"
-                # 3. Phone match
+                # 2. Phone match
                 if not is_duplicate and lead.phone and lead.phone in existing_phones:
                     is_duplicate, reason = True, "phone"
-                # 4. Email match
+                # 3. Email match
                 if not is_duplicate and lead.email and lead.email in existing_emails:
                     is_duplicate, reason = True, "email"
-                # 5. Fuzzy name match (>80% similarity)
+                # 4. Fuzzy name match (>80% similarity) — limit to first 500 names for speed
                 if not is_duplicate and lead.name:
                     norm = _normalize_name(lead.name)
-                    for ex_name in existing_names:
+                    for ex_name in existing_names[:500]:
                         if self._name_similarity(norm, ex_name) > 0.80:
                             is_duplicate, reason = True, f"name ~'{ex_name}'"
                             break
@@ -523,7 +543,7 @@ class ResearchAgent:
                     filtered.append(lead)
 
             skipped = len(leads) - len(filtered)
-            logger.info(f"[Research] Після дедуплікації: {len(filtered)}/{len(leads)} нових лідів (DB has {len(existing.data)} total records, skipped {skipped})")
+            logger.info(f"[Research] Після дедуплікації: {len(filtered)}/{len(leads)} нових лідів (DB checked {record_count} records, skipped {skipped})")
             return filtered
         except Exception as e:
             logger.warning(f"[Research] Дедуплікація не вдалась: {e}")

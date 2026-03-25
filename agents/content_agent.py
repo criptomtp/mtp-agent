@@ -266,6 +266,7 @@ MTP FULFILLMENT (продавець):
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
+            del api_key  # Free key string
 
             # Read model from pipeline settings, fallback chain if it fails
             configured_model = "gemini-2.0-flash"
@@ -294,12 +295,15 @@ MTP FULFILLMENT (продавець):
                     if response.text:
                         html = response.text.strip()
                         logger.info(f"[ContentAgent] {model_name} returned {len(html)} bytes")
+                        del response, model  # Free AI response objects
                         break
                     else:
                         logger.warning(f"[ContentAgent] {model_name} returned empty response")
+                        del response, model
                 except Exception as model_err:
                     logger.warning(f"[ContentAgent] {model_name} failed: {model_err}")
                     continue
+            del prompt  # Free large prompt string (~5KB+)
 
             if not html:
                 logger.error("[ContentAgent] All Gemini models failed for web proposal")

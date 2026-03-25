@@ -11,11 +11,11 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 def get_analytics():
     db = get_supabase()
 
-    # ── Leads ──────────────────────────────────────────────────────────────
+    # ── Leads (limit to last 5000 to cap memory) ─────────────────────────
     try:
         leads_res = db.table("leads").select(
             "id, score, score_grade, niche, outreach_status, created_at, proposal_url, email"
-        ).execute()
+        ).order("created_at", desc=True).limit(5000).execute()
         leads_data = leads_res.data or []
     except Exception:
         leads_data = []
@@ -28,12 +28,12 @@ def get_analytics():
         1 for l in leads_data if (l.get("outreach_status") or "").startswith("ready:")
     )
 
-    # ── Proposals ──────────────────────────────────────────────────────────
+    # ── Proposals (limit to last 2000) ───────────────────────────────────
     try:
         db_admin = get_supabase_admin()
         props_res = db_admin.table("proposals").select(
             "id, views_count, client_name, last_viewed_at"
-        ).execute()
+        ).order("created_at", desc=True).limit(2000).execute()
         proposals_data = props_res.data or []
     except Exception:
         proposals_data = []
